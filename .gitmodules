@@ -9,3 +9,7 @@
 	url = https://github.com/ish-app/linux
 	update = none
 	shallow = true
+[submodule "deps/blink"]
+	path = deps/blink
+	url = https://github.com/jart/blink.git
+	shallow = true
