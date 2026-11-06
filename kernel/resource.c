@@ -98,9 +98,14 @@ static int check_setrlimit(int resource, struct rlimit_ new_limit) {
 }
 
 slong_t sys_setrlimit32(dword_t resource, addr_t rlim_addr) {
-    struct rlimit_ rlimit;
-    if (user_get(rlim_addr, rlimit))
+    // i386's setrlimit passes two 32-bit words, where all ones is infinity
+    struct rlimit32_ rlimit32;
+    if (user_get(rlim_addr, rlimit32))
         return _EFAULT;
+    struct rlimit_ rlimit = {
+        .cur = rlimit32.cur == (rlim32_t_) -1 ? RLIM_INFINITY_ : rlimit32.cur,
+        .max = rlimit32.max == (rlim32_t_) -1 ? RLIM_INFINITY_ : rlimit32.max,
+    };
     STRACE("setrlimit(%d, {cur=%#x, max=%#x})", resource, rlimit.cur, rlimit.max);
     int err = check_setrlimit(resource, rlimit);
     if (err < 0)

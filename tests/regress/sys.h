@@ -21,7 +21,7 @@ enum {
     NR_exit = 1, NR_fork = 2, NR_read = 3, NR_write = 4, NR_open = 5,
     NR_close = 6, NR_waitpid = 7, NR_unlink = 10, NR_lseek = 19, NR_fcntl = 55,
     NR_old_mmap = 90, NR_munmap = 91, NR_nanosleep = 162, NR_mremap = 163,
-    NR_poll = 168,
+    NR_setrlimit = 75, NR_poll = 168, NR_getrlimit = 191,
     NR_pread64 = 180, NR_pwrite64 = 181, NR_ftruncate64 = 194,
     NR_fcntl64 = 221, NR_exit_group = 252,
 };
@@ -42,7 +42,7 @@ enum {
     NR_lseek = 8, NR_mmap = 9, NR_munmap = 11, NR_pread64 = 17,
     NR_pwrite64 = 18, NR_mremap = 25, NR_nanosleep = 35, NR_fork = 57,
     NR_exit = 60, NR_wait4 = 61, NR_fcntl = 72, NR_ftruncate = 77,
-    NR_unlink = 87, NR_exit_group = 231,
+    NR_unlink = 87, NR_getrlimit = 97, NR_setrlimit = 160, NR_exit_group = 231,
 };
 #else
 #error "no syscall shim for this architecture yet"
