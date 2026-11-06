@@ -400,7 +400,7 @@ dword_t sys__llseek(fd_t f, dword_t off_high, dword_t off_low, addr_t res_addr, 
     return 0;
 }
 
-dword_t sys_lseek(fd_t f, dword_t off, dword_t whence) {
+dword_t sys_lseek(fd_t f, sdword_t off, dword_t whence) {
     struct fd *fd = f_get(f);
     if (fd == NULL)
         return _EBADF;

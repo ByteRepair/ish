@@ -19,8 +19,9 @@ static inline slong sys6(slong n, slong a, slong b, slong c, slong d, slong e, s
 }
 enum {
     NR_exit = 1, NR_fork = 2, NR_read = 3, NR_write = 4, NR_open = 5,
-    NR_close = 6, NR_waitpid = 7, NR_unlink = 10, NR_fcntl = 55,
+    NR_close = 6, NR_waitpid = 7, NR_unlink = 10, NR_lseek = 19, NR_fcntl = 55,
     NR_old_mmap = 90, NR_munmap = 91, NR_nanosleep = 162, NR_mremap = 163,
+    NR_poll = 168,
     NR_pread64 = 180, NR_pwrite64 = 181, NR_ftruncate64 = 194,
     NR_fcntl64 = 221, NR_exit_group = 252,
 };
@@ -40,9 +41,9 @@ enum {
     MAP_PRIVATE = 2, MAP_FIXED = 0x10, MAP_ANONYMOUS = 0x20,
     O_RDWR = 2, O_CREAT = 0100, O_TRUNC = 01000,
     F_SETLK = 6, F_SETLKW = 7, F_SETLK64 = 13, F_SETLKW64 = 14,
-    F_WRLCK = 1, F_UNLCK = 2, SEEK_SET = 0,
+    F_WRLCK = 1, F_UNLCK = 2, SEEK_SET = 0, SEEK_CUR = 1, SEEK_END = 2,
     MREMAP_MAYMOVE = 1,
-    EAGAIN = 11, EFAULT = 14,
+    EAGAIN = 11, EFAULT = 14, EINVAL = 22,
 };
 
 static inline ulong strlen_(const char *s) {
