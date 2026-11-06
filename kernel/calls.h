@@ -49,8 +49,12 @@ addr_t sys_brk(addr_t new_brk);
 #define MMAP_PRIVATE 0x2
 #define MMAP_FIXED 0x10
 #define MMAP_ANONYMOUS 0x20
+#if GUEST_X86_64
+addr_t sys_mmap(addr_t addr, ulong_t len, ulong_t prot, ulong_t flags, fd_t fd_no, ulong_t offset);
+#else
 addr_t sys_mmap(addr_t args_addr);
 addr_t sys_mmap2(addr_t addr, dword_t len, dword_t prot, dword_t flags, fd_t fd_no, dword_t offset);
+#endif
 slong_t sys_munmap(addr_t addr, ulong_t len);
 slong_t sys_mprotect(addr_t addr, ulong_t len, int_t prot);
 slong_t sys_mremap(addr_t addr, ulong_t old_len, ulong_t new_len, ulong_t flags);
@@ -74,8 +78,13 @@ slong_t sys_write(fd_t fd_no, addr_t buf_addr, ulong_t size);
 slong_t sys_writev(fd_t fd_no, addr_t iovec_addr, dword_t iovec_count);
 slong_t sys__llseek(fd_t f, dword_t off_high, dword_t off_low, addr_t res_addr, dword_t whence);
 slong_t sys_lseek(fd_t f, slong_t off, dword_t whence);
+#if GUEST_X86_64
+slong_t sys_pread64(fd_t f, addr_t buf_addr, ulong_t size, slong_t off);
+slong_t sys_pwrite64(fd_t f, addr_t buf_addr, ulong_t size, slong_t off);
+#else
 slong_t sys_pread(fd_t f, addr_t buf_addr, dword_t buf_size, dword_t off_low, dword_t off_high);
 slong_t sys_pwrite(fd_t f, addr_t buf_addr, dword_t size, dword_t off_low, dword_t off_high);
+#endif
 slong_t sys_ioctl(fd_t f, dword_t cmd, ulong_t arg);
 slong_t sys_fcntl(fd_t f, dword_t cmd, ulong_t arg);
 slong_t sys_fcntl32(fd_t fd, dword_t cmd, ulong_t arg);

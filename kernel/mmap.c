@@ -47,7 +47,7 @@ void mm_release(struct mm *mm) {
     }
 }
 
-static addr_t do_mmap(addr_t addr, dword_t len, dword_t prot, dword_t flags, fd_t fd_no, dword_t offset) {
+static addr_t do_mmap(addr_t addr, ulong_t len, dword_t prot, dword_t flags, fd_t fd_no, ulong_t offset) {
     int err;
     pages_t pages = PAGE_ROUND_UP(len);
     if (!pages) return _EINVAL;
@@ -89,7 +89,7 @@ static addr_t do_mmap(addr_t addr, dword_t len, dword_t prot, dword_t flags, fd_
     return page << PAGE_BITS;
 }
 
-static addr_t mmap_common(addr_t addr, dword_t len, dword_t prot, dword_t flags, fd_t fd_no, dword_t offset) {
+static addr_t mmap_common(addr_t addr, ulong_t len, dword_t prot, dword_t flags, fd_t fd_no, ulong_t offset) {
     STRACE("mmap(0x%x, 0x%x, 0x%x, 0x%x, %d, %d)", addr, len, prot, flags, fd_no, offset);
     if (len == 0)
         return _EINVAL;
@@ -103,6 +103,18 @@ static addr_t mmap_common(addr_t addr, dword_t len, dword_t prot, dword_t flags,
     write_wrunlock(&current->mem->lock);
     return res;
 }
+
+#if GUEST_X86_64
+
+// x86-64's mmap takes its six arguments in registers and the offset in
+// bytes, which must be page aligned.
+addr_t sys_mmap(addr_t addr, ulong_t len, ulong_t prot, ulong_t flags, fd_t fd_no, ulong_t offset) {
+    if (PGOFFSET(offset) != 0)
+        return _EINVAL;
+    return mmap_common(addr, len, (dword_t) prot, (dword_t) flags, fd_no, offset);
+}
+
+#else
 
 addr_t sys_mmap2(addr_t addr, dword_t len, dword_t prot, dword_t flags, fd_t fd_no, dword_t offset) {
     return mmap_common(addr, len, prot, flags, fd_no, offset << PAGE_BITS);
@@ -118,6 +130,8 @@ addr_t sys_mmap(addr_t args_addr) {
         return _EFAULT;
     return mmap_common(args.addr, args.len, args.prot, args.flags, args.fd, args.offset);
 }
+
+#endif
 
 slong_t sys_munmap(addr_t addr, ulong_t len) {
     STRACE("munmap(0x%x, 0x%x)", addr, len);

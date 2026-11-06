@@ -217,13 +217,33 @@ runnable on the macOS harness (below) before the next begins.
    `#if !GUEST_X86_64`. On x86-64 a handler being called stops ish with a
    message naming milestone 6, ptrace answers ENOSYS until something needs
    it, and the syscall table is still i386's until milestone 4.
-4. **exec and a first guest.** ELF64 in `kernel/exec.c` and `elf.h`
+4. **exec and a first guest** — done. ELF64 in `kernel/exec.c` and `elf.h`
    (ELFCLASS64, EM_X86_64; ELF64 moves `p_flags` and reorders `Elf_Sym`):
    program headers, `PT_INTERP`, an 8-byte argv/envp stack, 16-byte auxv
    entries without i386's `AT_SYSINFO`, `AT_PLATFORM` "x86_64", and the
    x86-64 initial registers — r8 to r15 zeroed, mxcsr 0x1f80. The x86-64 syscall table (`syscall`, args in rdi, rsi, rdx, r10,
    r8, r9, number in rax), starting with write and exit_group. **Done when**
    `tests/blinkish/hello.S` prints under `ish`.
+
+   As built: each guest has its own ELF layouts under the same field names
+   (sizes asserted against the spec), and exec reads whichever it was
+   built for. The stack's argc, argv, envp and auxv are guest words. No
+   vdso or vvar on x86-64 yet, and no `AT_SYSINFO`. `uname -m` says
+   x86_64. The x86-64 table holds every call whose arguments, and whatever
+   it reads or writes in guest memory, are already the same shape as on
+   i386 — file I/O by descriptor, paths, ids, process control, `pollfd`,
+   `epoll_event`, `linux_dirent64`, termios, `statx` — plus `mmap` with
+   six arguments and a byte offset, and `pread64`/`pwrite64` with a whole
+   offset. What reads or writes a struct whose layout differs waits for
+   milestone 5, as ENOSYS rather than an i386 layout in an x86-64 program.
+
+   `tests/regress/` builds for either guest (`run.sh <ish> <root> x86_64`),
+   `sys.h` carrying an x86-64 shim and passing 64-bit offsets each
+   architecture's way. `exec_stack` checks what exec leaves at the first
+   instruction on both: alignment, argc, argv, envp, and the auxv values a
+   program depends on. On x86-64, five of seven pass; `pread_high` and
+   `fcntl_setlkw` want `ftruncate`, `fcntl` and `wait4`, milestone 5's. The
+   i386 build's code is unchanged.
 5. **Enough ABI for musl.** `arch_prctl` (FS base for TLS; today a stub
    at `kernel/misc.c:27`), and the x86-64 layouts of what differs: `stat`
    (144 bytes, its own field order — `newfstatat`, no stat64), `statfs`

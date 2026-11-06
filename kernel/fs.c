@@ -415,7 +415,7 @@ slong_t sys_lseek(fd_t f, slong_t off, dword_t whence) {
     return res;
 }
 
-static dword_t do_pread(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
+static slong_t do_pread(fd_t f, addr_t buf_addr, ulong_t size, off_t_ off) {
     STRACE("pread(%d, 0x%x, %d, %lld)", f, buf_addr, size, (long long) off);
     struct fd *fd = f_get(f);
     if (fd == NULL)
@@ -452,7 +452,7 @@ out:
     return res;
 }
 
-static dword_t do_pwrite(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
+static slong_t do_pwrite(fd_t f, addr_t buf_addr, ulong_t size, off_t_ off) {
     STRACE("pwrite(%d, 0x%x, %d, %lld)", f, buf_addr, size, (long long) off);
     struct fd *fd = f_get(f);
     if (fd == NULL)
@@ -483,6 +483,19 @@ static dword_t do_pwrite(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
     return res;
 }
 
+#if GUEST_X86_64
+
+// x86-64's pread64 and pwrite64 take the offset whole.
+slong_t sys_pread64(fd_t f, addr_t buf_addr, ulong_t size, slong_t off) {
+    return do_pread(f, buf_addr, size, off);
+}
+
+slong_t sys_pwrite64(fd_t f, addr_t buf_addr, ulong_t size, slong_t off) {
+    return do_pwrite(f, buf_addr, size, off);
+}
+
+#else
+
 // pread64 and pwrite64 take the offset as two 32-bit halves, low first.
 slong_t sys_pread(fd_t f, addr_t buf_addr, dword_t size, dword_t off_low, dword_t off_high) {
     return do_pread(f, buf_addr, size, (off_t_) ((uint64_t) off_high << 32 | off_low));
@@ -491,6 +504,8 @@ slong_t sys_pread(fd_t f, addr_t buf_addr, dword_t size, dword_t off_low, dword_
 slong_t sys_pwrite(fd_t f, addr_t buf_addr, dword_t size, dword_t off_low, dword_t off_high) {
     return do_pwrite(f, buf_addr, size, (off_t_) ((uint64_t) off_high << 32 | off_low));
 }
+
+#endif
 
 static int fd_ioctl(struct fd *fd, dword_t cmd, ulong_t arg) {
     ssize_t size = -1;

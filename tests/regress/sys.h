@@ -25,6 +25,25 @@ enum {
     NR_pread64 = 180, NR_pwrite64 = 181, NR_ftruncate64 = 194,
     NR_fcntl64 = 221, NR_exit_group = 252,
 };
+#elif defined(__x86_64__)
+static inline slong sys6(slong n, slong a, slong b, slong c, slong d, slong e, slong f) {
+    slong ret;
+    register slong r10 __asm__("r10") = d;
+    register slong r8 __asm__("r8") = e;
+    register slong r9 __asm__("r9") = f;
+    __asm__ volatile("syscall"
+                     : "=a"(ret)
+                     : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9)
+                     : "rcx", "r11", "memory");
+    return ret;
+}
+enum {
+    NR_read = 0, NR_write = 1, NR_open = 2, NR_close = 3, NR_poll = 7,
+    NR_lseek = 8, NR_mmap = 9, NR_munmap = 11, NR_pread64 = 17,
+    NR_pwrite64 = 18, NR_mremap = 25, NR_nanosleep = 35, NR_fork = 57,
+    NR_exit = 60, NR_wait4 = 61, NR_fcntl = 72, NR_ftruncate = 77,
+    NR_unlink = 87, NR_exit_group = 231,
+};
 #else
 #error "no syscall shim for this architecture yet"
 #endif
@@ -74,6 +93,40 @@ static inline void *mmap_(void *addr, ulong len, int prot, int flags, int fd, ul
     // away from ebp for the one call that needs all six.
     ulong args[6] = {(ulong) addr, len, (ulong) prot, (ulong) flags, (ulong) fd, off};
     return (void *) sys1(NR_old_mmap, args);
+#else
+    return (void *) sys6(NR_mmap, (slong) addr, len, prot, flags, fd, off);
+#endif
+}
+
+// The 64-bit offsets, which i386 passes as two halves, low first, and
+// x86-64 whole.
+static inline slong pread64_(slong fd, void *buf, ulong n, unsigned long long off) {
+#if defined(__i386__)
+    return sys5(NR_pread64, fd, buf, n, (ulong) off, (ulong) (off >> 32));
+#else
+    return sys4(NR_pread64, fd, buf, n, off);
+#endif
+}
+static inline slong pwrite64_(slong fd, const void *buf, ulong n, unsigned long long off) {
+#if defined(__i386__)
+    return sys5(NR_pwrite64, fd, buf, n, (ulong) off, (ulong) (off >> 32));
+#else
+    return sys4(NR_pwrite64, fd, buf, n, off);
+#endif
+}
+static inline slong ftruncate64_(slong fd, unsigned long long len) {
+#if defined(__i386__)
+    return sys3(NR_ftruncate64, fd, (ulong) len, (ulong) (len >> 32));
+#else
+    return sys2(NR_ftruncate, fd, len);
+#endif
+}
+
+static inline slong waitpid_(slong pid, int *status) {
+#if defined(__i386__)
+    return sys3(NR_waitpid, pid, status, 0);
+#else
+    return sys4(NR_wait4, pid, status, 0, 0);
 #endif
 }
 

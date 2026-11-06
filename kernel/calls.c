@@ -22,6 +22,134 @@ slong_t syscall_success_stub(void) {
 #if is_gcc(8) || is_clang(21)
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
+#if GUEST_X86_64
+
+// x86-64's numbers. Only calls whose arguments, and whatever they read or
+// write in the guest's memory, are the same shape on x86-64 as on i386 are
+// here so far: a handler that writes an i386 struct (stat, timespec, iovec,
+// sigaction, rusage, flock, msghdr) where x86-64 expects its own would be
+// worse than ENOSYS. Those arrive with their x86-64 layouts in milestone 5.
+syscall_t syscall_table[] = {
+    [0]   = (syscall_t) sys_read,
+    [1]   = (syscall_t) sys_write,
+    [2]   = (syscall_t) sys_open,
+    [3]   = (syscall_t) sys_close,
+    [7]   = (syscall_t) sys_poll,
+    [8]   = (syscall_t) sys_lseek,
+    [9]   = (syscall_t) sys_mmap,
+    [10]  = (syscall_t) sys_mprotect,
+    [11]  = (syscall_t) sys_munmap,
+    [12]  = (syscall_t) sys_brk,
+    [14]  = (syscall_t) sys_rt_sigprocmask,
+    [16]  = (syscall_t) sys_ioctl,
+    [17]  = (syscall_t) sys_pread64,
+    [18]  = (syscall_t) sys_pwrite64,
+    [21]  = (syscall_t) sys_access,
+    [22]  = (syscall_t) sys_pipe,
+    [24]  = (syscall_t) sys_sched_yield,
+    [25]  = (syscall_t) sys_mremap,
+    [26]  = (syscall_t) sys_msync,
+    [28]  = (syscall_t) sys_madvise,
+    [32]  = (syscall_t) sys_dup,
+    [33]  = (syscall_t) sys_dup2,
+    [34]  = (syscall_t) sys_pause,
+    [39]  = (syscall_t) sys_getpid,
+    [57]  = (syscall_t) sys_fork,
+    [58]  = (syscall_t) sys_vfork,
+    [59]  = (syscall_t) sys_execve,
+    [60]  = (syscall_t) sys_exit,
+    [62]  = (syscall_t) sys_kill,
+    [63]  = (syscall_t) sys_uname,
+    [73]  = (syscall_t) sys_flock,
+    [74]  = (syscall_t) sys_fsync,
+    [75]  = (syscall_t) sys_fsync, // fdatasync
+    [79]  = (syscall_t) sys_getcwd,
+    [80]  = (syscall_t) sys_chdir,
+    [81]  = (syscall_t) sys_fchdir,
+    [82]  = (syscall_t) sys_rename,
+    [83]  = (syscall_t) sys_mkdir,
+    [84]  = (syscall_t) sys_rmdir,
+    [86]  = (syscall_t) sys_link,
+    [87]  = (syscall_t) sys_unlink,
+    [88]  = (syscall_t) sys_symlink,
+    [89]  = (syscall_t) sys_readlink,
+    [90]  = (syscall_t) sys_chmod,
+    [91]  = (syscall_t) sys_fchmod,
+    [92]  = (syscall_t) sys_chown32,
+    [93]  = (syscall_t) sys_fchown32,
+    [94]  = (syscall_t) sys_lchown,
+    [95]  = (syscall_t) sys_umask,
+    [102] = (syscall_t) sys_getuid,
+    [103] = (syscall_t) sys_syslog,
+    [104] = (syscall_t) sys_getgid,
+    [105] = (syscall_t) sys_setuid,
+    [106] = (syscall_t) sys_setgid,
+    [107] = (syscall_t) sys_geteuid,
+    [108] = (syscall_t) sys_getegid,
+    [109] = (syscall_t) sys_setpgid,
+    [110] = (syscall_t) sys_getppid,
+    [111] = (syscall_t) sys_getpgrp,
+    [112] = (syscall_t) sys_setsid,
+    [113] = (syscall_t) sys_setreuid,
+    [114] = (syscall_t) sys_setregid,
+    [115] = (syscall_t) sys_getgroups,
+    [116] = (syscall_t) sys_setgroups,
+    [117] = (syscall_t) sys_setresuid,
+    [118] = (syscall_t) sys_getresuid,
+    [119] = (syscall_t) sys_setresgid,
+    [120] = (syscall_t) sys_getresgid,
+    [121] = (syscall_t) sys_getpgid,
+    [124] = (syscall_t) sys_getsid,
+    [125] = (syscall_t) sys_capget,
+    [126] = (syscall_t) sys_capset,
+    [127] = (syscall_t) sys_rt_sigpending,
+    [133] = (syscall_t) sys_mknod,
+    [135] = (syscall_t) sys_personality,
+    [140] = (syscall_t) sys_getpriority,
+    [141] = (syscall_t) sys_setpriority,
+    [149] = (syscall_t) sys_mlock,
+    [157] = (syscall_t) sys_prctl,
+    [161] = (syscall_t) sys_chroot,
+    [162] = (syscall_t) syscall_success_stub, // sync
+    [165] = (syscall_t) sys_mount,
+    [166] = (syscall_t) sys_umount2,
+    [170] = (syscall_t) sys_sethostname,
+    [186] = (syscall_t) sys_gettid,
+    [200] = (syscall_t) sys_tkill,
+    [213] = (syscall_t) sys_epoll_create0,
+    [217] = (syscall_t) sys_getdents64,
+    [218] = (syscall_t) sys_set_tid_address,
+    [231] = (syscall_t) sys_exit_group,
+    [232] = (syscall_t) sys_epoll_wait,
+    [233] = (syscall_t) sys_epoll_ctl,
+    [234] = (syscall_t) sys_tgkill,
+    [237] = (syscall_t) sys_mbind,
+    [257] = (syscall_t) sys_openat,
+    [258] = (syscall_t) sys_mkdirat,
+    [259] = (syscall_t) sys_mknodat,
+    [260] = (syscall_t) sys_fchownat,
+    [263] = (syscall_t) sys_unlinkat,
+    [264] = (syscall_t) sys_renameat,
+    [265] = (syscall_t) sys_linkat,
+    [266] = (syscall_t) sys_symlinkat,
+    [267] = (syscall_t) sys_readlinkat,
+    [268] = (syscall_t) sys_fchmodat,
+    [269] = (syscall_t) sys_faccessat,
+    [284] = (syscall_t) sys_eventfd,
+    [290] = (syscall_t) sys_eventfd2,
+    [291] = (syscall_t) sys_epoll_create,
+    [292] = (syscall_t) sys_dup3,
+    [293] = (syscall_t) sys_pipe2,
+    [316] = (syscall_t) sys_renameat2,
+    [318] = (syscall_t) sys_getrandom,
+    [324] = (syscall_t) syscall_silent_stub, // membarrier
+    [326] = (syscall_t) sys_copy_file_range,
+    [332] = (syscall_t) sys_statx,
+    [439] = (syscall_t) syscall_silent_stub, // faccessat2
+};
+
+#else
+
 syscall_t syscall_table[] = {
     [1]   = (syscall_t) sys_exit,
     [2]   = (syscall_t) sys_fork,
@@ -251,6 +379,8 @@ syscall_t syscall_table[] = {
     [422] = (syscall_t) syscall_silent_stub, // futex_time64
     [439] = (syscall_t) syscall_silent_stub, // faccessat2
 };
+
+#endif
 
 #define NUM_SYSCALLS (sizeof(syscall_table) / sizeof(syscall_table[0]))
 

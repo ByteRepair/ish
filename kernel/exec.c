@@ -45,10 +45,10 @@ static int read_header(struct fd *fd, struct elf_header *header) {
     }
     if (memcmp(&header->magic, ELF_MAGIC, sizeof(header->magic)) != 0
             || (header->type != ELF_EXECUTABLE && header->type != ELF_DYNAMIC)
-            || header->bitness != ELF_32BIT
+            || header->bitness != ELF_CLASS
             || header->endian != ELF_LITTLEENDIAN
             || header->elfversion1 != 1
-            || header->machine != ELF_X86)
+            || header->machine != ELF_MACHINE)
         return _ENOEXEC;
     return 0;
 }
@@ -100,7 +100,7 @@ static int load_entry(struct prg_header ph, addr_t bias, struct fd *fd) {
         // first zero the tail from the end of the file mapping to the end
         // of the load entry or the end of the page, whichever comes first
         addr_t file_end = addr + filesize;
-        dword_t tail_size = PAGE_SIZE - PGOFFSET(file_end);
+        ulong_t tail_size = PAGE_SIZE - PGOFFSET(file_end);
         if (tail_size == PAGE_SIZE)
             // if you can calculate tail_size better and not have to do this please let me know
             tail_size = 0;
@@ -258,6 +258,10 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         entry = interp_base + interp_header.entry_point;
     }
 
+#if GUEST_X86_64
+    // No vdso yet (milestone 7): musl calls the kernel for the time when
+    // AT_SYSINFO_EHDR is absent, and x86-64 has no vsyscall entry to give.
+#else
     // map vdso
     err = _ENOMEM;
     pages_t vdso_pages = sizeof(vdso_data) >> PAGE_BITS;
@@ -281,6 +285,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     if ((err = pt_map_nothing(current->mem, vvar_page, VVAR_PAGES, 0)) < 0)
         goto beyond_hope;
     mem_pt(current->mem, vvar_page)->data->name = "[vvar]";
+#endif
 
     // STACK TIME!
 
@@ -310,7 +315,11 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     current->mm->argv_start = sp;
     sp = align_stack(sp);
 
+#if GUEST_X86_64
+    addr_t platform_addr = sp = copy_string(sp, "x86_64");
+#else
     addr_t platform_addr = sp = copy_string(sp, "i686");
+#endif
     if (sp == 0)
         goto beyond_hope;
     // 16 random bytes so no system call is needed to seed a userspace RNG
@@ -326,8 +335,10 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
 
     // declare elf aux now so we can know how big it is
     struct aux_ent aux[] = {
+#if !GUEST_X86_64
         {AX_SYSINFO, vdso_entry},
         {AX_SYSINFO_EHDR, current->mm->vdso},
+#endif
         {AX_HWCAP, 0x00000000}, // suck that
         {AX_PAGESZ, PAGE_SIZE},
         {AX_CLKTCK, 0x64},
@@ -348,7 +359,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         {AX_PLATFORM, platform_addr},
         {0, 0}
     };
-    sp -= ((argv.count + 1) + (envp.count + 1) + 1) * sizeof(dword_t);
+    sp -= ((argv.count + 1) + (envp.count + 1) + 1) * sizeof(addr_t);
     sp -= sizeof(aux);
     sp &=~ 0xf;
 
@@ -357,10 +368,10 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
 
     // argc
     // argc is a guest word: a size_t would write past it into argv[0].
-    dword_t argc_word = argv.count;
+    ulong_t argc_word = argv.count;
     if (user_put(p, argc_word))
         return _EFAULT;
-    p += sizeof(dword_t);
+    p += sizeof(argc_word);
 
     // argv
     size_t argc = argv.count;
@@ -368,9 +379,9 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         if (user_put(p, argv_addr))
             return _EFAULT;
         argv_addr += user_strlen(argv_addr) + 1;
-        p += sizeof(dword_t); // null terminator
+        p += sizeof(addr_t);
     }
-    p += sizeof(dword_t); // null terminator
+    p += sizeof(addr_t); // null terminator
 
     // envp
     size_t envc = envp.count;
@@ -378,9 +389,9 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         if (user_put(p, envp_addr))
             return _EFAULT;
         envp_addr += user_strlen(envp_addr) + 1;
-        p += sizeof(dword_t);
+        p += sizeof(addr_t);
     }
-    p += sizeof(dword_t); // null terminator
+    p += sizeof(addr_t); // null terminator
 
     // copy auxv
     current->mm->auxv_start = p;

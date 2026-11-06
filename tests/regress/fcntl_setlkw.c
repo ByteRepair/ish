@@ -4,17 +4,26 @@
 // lets go, and its non-waiting request must fail while the parent holds it.
 #include "sys.h"
 
+// i386 has two layouts: flock through fcntl, and the packed flock64 through
+// fcntl64. x86-64 has fcntl alone, whose flock is the first one laid out
+// naturally, longs and all.
 struct flock32 { short type, whence; long start, len; int pid; };
+#if defined(__i386__)
 struct flock64 { short type, whence; long long start, len; int pid; } __attribute__((packed));
+#endif
 
 static slong lock32(slong fd, int cmd, short type) {
     struct flock32 l = {type, SEEK_SET, 0, 0, 0};
     return sys3(NR_fcntl, fd, cmd, &l);
 }
+#if defined(__i386__)
 static slong lock64(slong fd, int cmd, short type) {
     struct flock64 l = {type, SEEK_SET, 0, 0, 0};
     return sys3(NR_fcntl64, fd, cmd, &l);
 }
+#else
+#define lock64 lock32
+#endif
 
 static void child(const char *path, int wide) {
     slong fd = sys3(NR_open, path, O_RDWR, 0);
@@ -39,7 +48,7 @@ static void run(const char *path, int wide) {
     sleep_ms(200);
     check((wide ? lock64 : lock32)(fd, wide ? F_SETLK64 : F_SETLK, F_UNLCK) == 0, "parent unlock failed");
     int status = 0;
-    check(sys3(NR_waitpid, pid, &status, 0) == pid, "waitpid failed");
+    check(waitpid_(pid, &status) == pid, "waitpid failed");
     check(status == 0, wide ? "child's 64-bit locks misbehaved" : "child's 32-bit locks misbehaved");
     sys1(NR_close, fd);
 }
@@ -47,7 +56,9 @@ static void run(const char *path, int wide) {
 void _start(void) {
     const char *path = "/tmp/fcntl_setlkw";
     run(path, 0);
+#if defined(__i386__)
     run(path, 1);
+#endif
     sys1(NR_unlink, path);
     finish(1, 0);
 }
