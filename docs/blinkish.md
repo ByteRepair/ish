@@ -288,17 +288,22 @@ runnable on the macOS harness (below) before the next begins.
    `sched_getaffinity` answers in whole longs, as Linux does. Those three
    are the only i386 code this milestone changes. `free` shows zeros on
    both guests: the macOS platform layer never fills in memory figures.
-6. **clone, fork and signals.** Copy the `Machine` on fork and clone —
-   x86-64's clone takes `(flags, stack, ptid, ctid, tls)`, not i386's
-   order, and `CLONE_SETTLS` sets the FS base rather than a `user_desc`.
-   The x86-64 `rt_sigframe` (`{pretcode, ucontext, siginfo}`, the fxsave
-   area 64-byte aligned, a 128-byte red zone skipped, rdi/rsi/rdx = sig,
-   info, uc), returning through the libc's `SA_RESTORER` rather than a
-   vdso trampoline, and `rt_sigreturn`. The FP and SSE state is saved and
-   restored around a handler: i386 iSH never did (`signal.c:173`, "TODO"),
-   which mostly went unnoticed there, but on x86-64 every float is in an
-   xmm register. **Done when** `busybox sh -c` runs
-   pipelines and `trap` works.
+6. **clone, fork and signals** — done. The register file is copied on fork and
+   clone, and the child re-establishes its own `Machine` on first run
+   (`engine_cpu_copied` clears it) — never a deep copy, which would carry
+   blink's caches and host pointers. x86-64's clone takes
+   `(flags, stack, ptid, ctid, tls)`, not i386's order, so a
+   `GUEST_X86_64`-guarded `sys_clone64` reorders the child-tid and TLS
+   arguments before the shared `sys_clone`; `CLONE_SETTLS` sets the FS base
+   rather than a `user_desc`. The x86-64 `rt_sigframe`
+   (`{pretcode, ucontext, siginfo}`, the fxsave area 16-byte aligned below
+   the frame, rdi/rsi/rdx = sig, info, uc), returning through the libc's
+   `SA_RESTORER` rather than a vdso trampoline — `rt_sigaction` now honours
+   that field — and `rt_sigreturn` reads the frame back. The FP and SSE
+   state is saved and restored around a handler: i386 iSH never did
+   (`signal.c:173`, "TODO"), which mostly went unnoticed there, but on
+   x86-64 every float is in an xmm register. **Done when** `busybox sh -c`
+   runs pipelines and `trap` works.
 7. **A whole Alpine.** No vdso at first (musl falls back to syscalls when
    `AT_SYSINFO_EHDR` is absent), an x86-64 vdso later if time calls show up in
    profiles. **Done when** `apk add git python3` succeeds and both run, on
