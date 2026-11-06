@@ -11,7 +11,7 @@
 #include "kernel/errno.h"
 #include "kernel/signal.h"
 #include "kernel/memory.h"
-#include "asbestos/asbestos.h"
+#include "emu/engine.h"
 #include "kernel/vdso.h"
 #include "kernel/task.h"
 #include "fs/fd.h"
@@ -20,87 +20,188 @@
 static void mem_changed(struct mem *mem);
 static struct mmu_ops mem_mmu_ops;
 
+struct pt_dir {
+    void *slots[MEM_LEVEL_SIZE]; // struct pt_dir below the last level, struct pt_leaf at it
+};
+struct pt_leaf {
+    unsigned used; // entries with data
+    struct pt_entry entries[MEM_LEVEL_SIZE];
+};
+
+// The pages one slot covers at a level, counting the root as 0 and the leaf
+// as MEM_LEVELS - 1, and a page's index into that level.
+#define LEVEL_SHIFT(level) (MEM_LEVEL_BITS * (MEM_LEVELS - 1 - (level)))
+#define LEVEL_SPAN(level) ((page_t) 1 << LEVEL_SHIFT(level))
+#define LEVEL_INDEX(page, level) (((page) >> LEVEL_SHIFT(level)) & (MEM_LEVEL_SIZE - 1))
+#define LEAF_LEVEL (MEM_LEVELS - 1)
+
 void mem_init(struct mem *mem) {
-    mem->pgdir = calloc(MEM_PGDIR_SIZE, sizeof(struct pt_entry *));
-    mem->pgdir_used = 0;
+    mem->root = calloc(1, sizeof(struct pt_dir));
     mem->mmu.ops = &mem_mmu_ops;
-    mem->mmu.asbestos = asbestos_new(&mem->mmu);
+    engine_mem_init(&mem->mmu);
     mem->mmu.changes = 0;
     wrlock_init(&mem->lock);
+}
+
+static void pt_free_level(void *node, int level) {
+    if (node == NULL)
+        return;
+    if (level < LEAF_LEVEL) {
+        struct pt_dir *dir = node;
+        for (int i = 0; i < MEM_LEVEL_SIZE; i++)
+            pt_free_level(dir->slots[i], level + 1);
+    }
+    free(node);
 }
 
 void mem_destroy(struct mem *mem) {
     write_wrlock(&mem->lock);
     pt_unmap_always(mem, 0, MEM_PAGES);
-    asbestos_free(mem->mmu.asbestos);
-    for (int i = 0; i < MEM_PGDIR_SIZE; i++) {
-        if (mem->pgdir[i] != NULL)
-            free(mem->pgdir[i]);
-    }
-    free(mem->pgdir);
+    engine_mem_destroy(&mem->mmu);
+    pt_free_level(mem->root, 0);
     write_wrunlock(&mem->lock);
     wrlock_destroy(&mem->lock);
 }
 
-#define PGDIR_TOP(page) ((page) >> 10)
-#define PGDIR_BOTTOM(page) ((page) & (MEM_PGDIR_SIZE - 1))
+// The leaf holding page, made (with any directories above it) if create.
+static struct pt_leaf *mem_leaf(struct mem *mem, page_t page, bool create) {
+    if (page >= MEM_PAGES)
+        return NULL;
+    struct pt_dir *dir = mem->root;
+    for (int level = 0; level < LEAF_LEVEL; level++) {
+        void **slot = &dir->slots[LEVEL_INDEX(page, level)];
+        if (*slot == NULL) {
+            if (!create)
+                return NULL;
+            *slot = calloc(1, level + 1 < LEAF_LEVEL ? sizeof(struct pt_dir) : sizeof(struct pt_leaf));
+            if (*slot == NULL)
+                die("out of memory for the page table");
+        }
+        dir = *slot;
+    }
+    return (struct pt_leaf *) dir;
+}
 
 static struct pt_entry *mem_pt_new(struct mem *mem, page_t page) {
-    struct pt_entry *pgdir = mem->pgdir[PGDIR_TOP(page)];
-    if (pgdir == NULL) {
-        pgdir = mem->pgdir[PGDIR_TOP(page)] = calloc(MEM_PGDIR_SIZE, sizeof(struct pt_entry));
-        mem->pgdir_used++;
-    }
-    return &pgdir[PGDIR_BOTTOM(page)];
+    struct pt_leaf *leaf = mem_leaf(mem, page, true);
+    struct pt_entry *entry = &leaf->entries[LEVEL_INDEX(page, LEAF_LEVEL)];
+    // every caller unmaps the page first, and fills in data next
+    assert(entry->data == NULL);
+    leaf->used++;
+    return entry;
 }
 
 struct pt_entry *mem_pt(struct mem *mem, page_t page) {
-    struct pt_entry *pgdir = mem->pgdir[PGDIR_TOP(page)];
-    if (pgdir == NULL)
+    struct pt_leaf *leaf = mem_leaf(mem, page, false);
+    if (leaf == NULL)
         return NULL;
-    struct pt_entry *entry = &pgdir[PGDIR_BOTTOM(page)];
+    struct pt_entry *entry = &leaf->entries[LEVEL_INDEX(page, LEAF_LEVEL)];
     if (entry->data == NULL)
         return NULL;
     return entry;
 }
 
 static void mem_pt_del(struct mem *mem, page_t page) {
-    struct pt_entry *entry = mem_pt(mem, page);
-    if (entry != NULL)
-        entry->data = NULL;
-}
-
-void mem_next_page(struct mem *mem, page_t *page) {
-    (*page)++;
-    if (*page >= MEM_PAGES)
+    struct pt_leaf *leaf = mem_leaf(mem, page, false);
+    if (leaf == NULL)
         return;
-    while (*page < MEM_PAGES && mem->pgdir[PGDIR_TOP(*page)] == NULL)
-        *page = (*page - PGDIR_BOTTOM(*page)) + MEM_PGDIR_SIZE;
+    struct pt_entry *entry = &leaf->entries[LEVEL_INDEX(page, LEAF_LEVEL)];
+    if (entry->data != NULL) {
+        entry->data = NULL;
+        leaf->used--;
+    }
 }
 
-page_t pt_find_hole(struct mem *mem, pages_t size) {
-    page_t hole_end = 0; // this can never be used before initializing but gcc doesn't realize
-    bool in_hole = false;
-    for (page_t page = 0xf7ffd; page > 0x40000; page--) {
-        // I don't know how this works but it does
-        if (!in_hole && mem_pt(mem, page) == NULL) {
-            in_hole = true;
-            hole_end = page + 1;
+// Descend towards page. Answers the leaf holding it, or NULL with *level set
+// to the level of the missing slot, whose LEVEL_SPAN pages are all unmapped.
+static struct pt_leaf *mem_find_leaf(struct mem *mem, page_t page, int *level) {
+    struct pt_dir *dir = mem->root;
+    for (*level = 0; *level < LEAF_LEVEL; (*level)++) {
+        void *child = dir->slots[LEVEL_INDEX(page, *level)];
+        if (child == NULL)
+            return NULL;
+        dir = child;
+    }
+    return (struct pt_leaf *) dir;
+}
+
+page_t mem_next_mapped(struct mem *mem, page_t page) {
+    while (page < MEM_PAGES) {
+        int level;
+        struct pt_leaf *leaf = mem_find_leaf(mem, page, &level);
+        if (leaf != NULL && leaf->used != 0) {
+            for (unsigned i = LEVEL_INDEX(page, LEAF_LEVEL); i < MEM_LEVEL_SIZE; i++, page++) {
+                if (leaf->entries[i].data != NULL)
+                    return page;
+            }
+            continue; // page is now the next leaf's first
         }
-        if (mem_pt(mem, page) != NULL)
-            in_hole = false;
-        else if (hole_end - page == size)
+        // nothing mapped from here to the end of the missing slot or empty leaf
+        page_t span = LEVEL_SPAN(leaf == NULL ? level : LEAF_LEVEL);
+        page = (page | (span - 1)) + 1;
+    }
+    return MEM_PAGES;
+}
+
+// The highest page in [floor, page] that is mapped (if mapped) or unmapped
+// (if not), or BAD_PAGE if there is none. A leaf whose entries are all the
+// other kind, and a missing slot when looking for a mapped page, are stepped
+// over whole.
+static page_t mem_prev(struct mem *mem, page_t page, page_t floor, bool mapped) {
+    while (page != BAD_PAGE && page >= floor) {
+        int level;
+        struct pt_leaf *leaf = mem_find_leaf(mem, page, &level);
+        if (leaf == NULL && !mapped)
             return page;
+        page_t span;
+        if (leaf == NULL) {
+            span = LEVEL_SPAN(level);
+        } else if (leaf->used == (mapped ? 0 : MEM_LEVEL_SIZE)) {
+            span = LEVEL_SPAN(LEAF_LEVEL);
+        } else {
+            for (unsigned i = LEVEL_INDEX(page, LEAF_LEVEL); page >= floor; i--, page--) {
+                if ((leaf->entries[i].data != NULL) == mapped)
+                    return page;
+                if (i == 0)
+                    break;
+            }
+            if (page < floor)
+                return BAD_PAGE;
+            span = LEVEL_SPAN(LEAF_LEVEL);
+        }
+        // step below the slot or leaf; from the first one, there is nowhere
+        page_t base = page & ~(span - 1);
+        if (base == 0)
+            return BAD_PAGE;
+        page = base - 1;
+    }
+    return BAD_PAGE;
+}
+
+// The highest hole of size pages between MEM_HOLE_BOTTOM and MEM_HOLE_TOP,
+// placed at its top: the place a page-by-page scan down from the top would
+// find first, without scanning.
+page_t pt_find_hole(struct mem *mem, pages_t size) {
+    if (size == 0)
+        return BAD_PAGE;
+    page_t top = MEM_HOLE_TOP; // exclusive
+    while (top > MEM_HOLE_BOTTOM && top - MEM_HOLE_BOTTOM >= size) {
+        page_t free_page = mem_prev(mem, top - 1, MEM_HOLE_BOTTOM, false);
+        if (free_page == BAD_PAGE)
+            return BAD_PAGE;
+        page_t used_page = mem_prev(mem, free_page, MEM_HOLE_BOTTOM, true);
+        page_t hole_start = used_page == BAD_PAGE ? MEM_HOLE_BOTTOM : used_page + 1;
+        if (free_page + 1 - hole_start >= size)
+            return free_page + 1 - size;
+        if (used_page == BAD_PAGE)
+            return BAD_PAGE;
+        top = used_page;
     }
     return BAD_PAGE;
 }
 
 bool pt_is_hole(struct mem *mem, page_t start, pages_t pages) {
-    for (page_t page = start; page < start + pages; page++) {
-        if (mem_pt(mem, page) != NULL)
-            return false;
-    }
-    return true;
+    return mem_next_mapped(mem, start) >= start + pages;
 }
 
 int pt_map(struct mem *mem, page_t start, pages_t pages, void *memory, size_t offset, unsigned flags) {
@@ -143,11 +244,9 @@ int pt_unmap(struct mem *mem, page_t start, pages_t pages) {
 }
 
 int pt_unmap_always(struct mem *mem, page_t start, pages_t pages) {
-    for (page_t page = start; page < start + pages; mem_next_page(mem, &page)) {
+    for (page_t page = mem_next_mapped(mem, start); page < start + pages; page = mem_next_mapped(mem, page + 1)) {
         struct pt_entry *pt = mem_pt(mem, page);
-        if (pt == NULL)
-            continue;
-        asbestos_invalidate_page(mem->mmu.asbestos, page);
+        engine_page_changed(&mem->mmu, page);
         struct data *data = pt->data;
         mem_pt_del(mem, page);
         if (--data->refcount == 0) {
@@ -198,10 +297,8 @@ int pt_set_flags(struct mem *mem, page_t start, pages_t pages, int flags) {
 }
 
 int pt_copy_on_write(struct mem *src, struct mem *dst, page_t start, page_t pages) {
-    for (page_t page = start; page < start + pages; mem_next_page(src, &page)) {
+    for (page_t page = mem_next_mapped(src, start); page < start + pages; page = mem_next_mapped(src, page + 1)) {
         struct pt_entry *entry = mem_pt(src, page);
-        if (entry == NULL)
-            continue;
         if (pt_unmap_always(dst, page, 1) < 0)
             return -1;
         if (!(entry->flags & P_SHARED))
@@ -241,9 +338,7 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     if (entry == NULL) {
         // page does not exist
         // look to see if the next VM region is willing to grow down
-        page_t p = page + 1;
-        while (p < MEM_PAGES && mem_pt(mem, p) == NULL)
-            p++;
+        page_t p = mem_next_mapped(mem, page + 1);
         if (p >= MEM_PAGES)
             return NULL;
         if (!(mem_pt(mem, p)->flags & P_GROWSDOWN))
@@ -273,7 +368,7 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
             entry->flags |= P_WRITE | P_COW;
         }
         // get rid of any compiled blocks in this page
-        asbestos_invalidate_page(mem->mmu.asbestos, page);
+        engine_page_changed(&mem->mmu, page);
         // if page is cow, ~~milk~~ copy it
         if (entry->flags & P_COW) {
             void *data = (char *) entry->data->data + entry->offset;
@@ -321,18 +416,12 @@ void mem_coredump(struct mem *mem, const char *file) {
         perror("open");
         return;
     }
-    if (ftruncate(fd, 0xffffffff) < 0) {
-        perror("ftruncate");
-        return;
-    }
-
+    // a sparse file, each page at its own address
     int pages = 0;
-    for (page_t page = 0; page < MEM_PAGES; page++) {
+    for (page_t page = mem_next_mapped(mem, 0); page < MEM_PAGES; page = mem_next_mapped(mem, page + 1)) {
         struct pt_entry *entry = mem_pt(mem, page);
-        if (entry == NULL)
-            continue;
         pages++;
-        if (lseek(fd, page << PAGE_BITS, SEEK_SET) < 0) {
+        if (lseek(fd, (off_t) page << PAGE_BITS, SEEK_SET) < 0) {
             perror("lseek");
             return;
         }

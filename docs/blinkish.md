@@ -112,7 +112,7 @@ runnable on the macOS harness (below) before the next begins.
    the signal frames. The fs layer below the syscall boundary
    — fs ops, realfs, fakefs, tmpfs, ttys, poll, locks — and `util/`,
    `platform/` and `main.c` need nothing.
-2. **The address space.** `struct mem` becomes a four-level table over the
+2. **The address space** — done. `struct mem` becomes a four-level table over the
    47-bit user half; `mem_next_page` skips empty subtrees at every level;
    `pt_find_hole` walks from the top skipping full and empty subtrees rather
    than scanning pages (a linear scan of 2^35 pages is not an option); the TLB
@@ -127,6 +127,20 @@ runnable on the macOS harness (below) before the next begins.
    (`exec.c:226`). And `struct mmu` stops holding asbestos: the five places
    `kernel/memory.c` calls it (create, free, invalidate on write) become
    engine hooks, so each engine is told of a written or remapped page.
+
+   As built: one radix table for both guests, two levels of 10 bits for
+   i386 and four of 9 for x86-64, each leaf counting its mapped entries.
+   Walks (`mem_next_mapped`, and a backward one for mapped or free pages)
+   step over a missing directory slot, an empty leaf or a full one whole.
+   The hole finder alternates the two backward walks and answers exactly
+   what the old page-by-page scan did — the highest hole that fits, at
+   its top — which `tests/unit/memory_test.c` checks against a literal
+   copy of the scan over forty fixed layouts, for both guests; on i386 a
+   process's whole `/proc/self/maps` is byte-for-byte what it was. The
+   engine hooks are `emu/engine.h`; the TLB is built for both engines, its
+   index masked so a 64-bit address stays in the table. `BAD_PAGE` is all
+   ones. `/proc/pid/maps` also stopped running a region on across an
+   unmapped gap a whole directory wide.
 3. **The engine.** `emu/blink/`: the interpreter-only subset of blink's
    sources (the decoder, `machine.c`'s dispatch, the ALU, string, stack,
    x87, SSE and BMI2 ops, `bus.c` for LOCK), built with `-DDISABLE_JIT

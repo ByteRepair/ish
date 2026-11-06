@@ -51,36 +51,33 @@ offsets = custom_target('offsets',
     output: 'cpu-offsets.h', input: 'asbestos/offsets.c', depfile: 'cpu-offsets.h.d',
     command: [find_program('tools/staticdefine.sh'), '@OUTDIR@/compile_commands.json', '@INPUT@', '@OUTPUT@', '@DEPFILE@'])
 
-emu_src = [
-    'emu/tlb.c',
-    'emu/fpu.c',
-    'emu/vec.c',
-    'emu/mmx.c',
-    'emu/float80.c',
-
-]
-gadgets = 'asbestos/gadgets-' + host_machine.cpu_family()
-emu_src += [
-    'asbestos/asbestos.c',
-    'asbestos/gen.c',
-    'asbestos/helpers.c',
-    gadgets+'/entry.S',
-    gadgets+'/memory.S',
-    gadgets+'/control.S',
-    gadgets+'/math.S',
-    gadgets+'/bits.S',
-    gadgets+'/string.S',
-    gadgets+'/misc.S',
-    offsets,
-]
-
+# The TLB is the engine's cache of the kernel's page table, and either
+# engine uses it; the rest is the engine itself.
+emu_src = ['emu/tlb.c']
 if get_option('engine') == 'asbestos'
-    libish_emu = library('ish_emu', emu_src, include_directories: includes)
-else
-    # The blink engine is milestone 3; until then an x86_64 build is the
-    # kernel library alone, with nothing to run it.
-    libish_emu = []
+    gadgets = 'asbestos/gadgets-' + host_machine.cpu_family()
+    emu_src += [
+        'emu/fpu.c',
+        'emu/vec.c',
+        'emu/mmx.c',
+        'emu/float80.c',
+        'asbestos/asbestos.c',
+        'asbestos/gen.c',
+        'asbestos/helpers.c',
+        gadgets+'/entry.S',
+        gadgets+'/memory.S',
+        gadgets+'/control.S',
+        gadgets+'/math.S',
+        gadgets+'/bits.S',
+        gadgets+'/string.S',
+        gadgets+'/misc.S',
+        offsets,
+    ]
+elif get_option('engine') == 'blink'
+    # the interpreter arrives in milestone 3; until then, its hooks
+    emu_src += ['emu/blink/engine.c']
 endif
+libish_emu = library('ish_emu', emu_src, include_directories: includes)
 
 libfakefs = library('fakefs',
     ['fs/fake-db.c', 'fs/fake-migrate.c', 'fs/fake-rebuild.c'],
@@ -177,6 +174,12 @@ if get_option('kernel') == 'ish'
 
     if not meson.is_cross_build() and get_option('engine') == 'asbestos'
         executable('ish', ['main.c'], dependencies: ish)
+    endif
+
+    if not meson.is_cross_build()
+        # the memory layer alone, for whichever guest this build is
+        memory_test = executable('memory_test', 'tests/unit/memory_test.c', dependencies: ish)
+        test('memory', memory_test)
     endif
 
 elif get_option('kernel') == 'linux'

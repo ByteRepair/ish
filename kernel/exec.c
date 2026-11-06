@@ -223,7 +223,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         if (!load_addr_set && header.type == ELF_DYNAMIC) {
             // see giant comment in linux/fs/binfmt_elf.c, around line 950
             if (interp_name)
-                bias = 0x56555000; // I have no idea how this number was arrived at
+                bias = MEM_PIE_BIAS;
             else
                 bias = find_hole_for_elf(&header, ph);
         }
@@ -284,12 +284,12 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
 
     // STACK TIME!
 
-    // allocate 1 page of stack at 0xffffd, and let it grow down
-    if ((err = pt_map_nothing(current->mem, 0xffffd, 1, P_WRITE | P_GROWSDOWN)) < 0)
+    // allocate 1 page of stack just below the top, and let it grow down
+    if ((err = pt_map_nothing(current->mem, PAGE(MEM_STACK_TOP) - 1, 1, P_WRITE | P_GROWSDOWN)) < 0)
         goto beyond_hope;
     // that was the last memory mapping
     write_wrunlock(&current->mem->lock);
-    dword_t sp = 0xffffe000;
+    addr_t sp = MEM_STACK_TOP;
     // on 32-bit linux, there's 4 empty bytes at the very bottom of the stack.
     // on 64-bit linux, there's 8. make ptraceomatic happy. (a major theme in this file)
     sp -= sizeof(void *);
