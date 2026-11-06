@@ -76,35 +76,122 @@ runnable on the macOS harness (below) before the next begins.
 0. **Groundwork** — done. The fork, blink at `deps/blink`, the read-only
    mounts commit, a macOS harness, the test guests, and stock blink as the
    oracle.
+0½. **Bugs found on the way**, each its own commit, fixed in the i386 build
+   before anything moves (and offerable upstream): mmap's non-fixed hint
+   that is not a hole maps over what is there (`kernel/mmap.c:59-61`);
+   mremap dereferences the NULL it tests for (`mmap.c:163`); exec stores
+   argc with a host `size_t` write then steps 4 bytes (`kernel/exec.c:359`);
+   fcntl's SETLK64 tests the wrong wait constants (`fs/fd.c:369,375`); a
+   forked task inherits the parent's `poked_ptr` (`kernel/task.c:59`);
+   pread/pwrite take an `off_t_` through `dword_t` slots (`kernel/fs.c:417,
+   454`).
 1. **The build switch and 64-bit types.** `-Dguest`/`-Dengine=blink` in
-   meson; `misc.h` types per guest; the kernel compiles clean for x86_64 with
-   `-Wshorten-64-to-32` on the touched files. The i386 build's behaviour is
-   untouched, checked by its own guest still running.
+   meson. Not a global widening: `uint_t`, `int_t` and `dword_t` each stand
+   for a C `int` in some places and a `long`, `size_t` or pointer in
+   others, and socklen, flags, fds, futex words, ioctl ints and pids stay
+   32-bit on x86-64. So a guest `long` pair (`ulong_t`/`slong_t`, 32-bit on
+   i386, 64-bit on x86_64) joins `addr_t`, and every prototype in
+   `kernel/calls.h` (about 200) and every guest struct is read and given the
+   right one; `time_t_` and `clock_t_` become guest longs. `syscall_t`
+   takes six guest longs and returns one, so mmap and brk can answer above
+   4 GiB and an error sign-extends into rax (`calls.h:258`,
+   `calls.c:271-273`, and the socketcall table at `fs/sock.c:1201`, which
+   reuses the type). The kernel compiles clean for x86_64 with
+   `-Wshorten-64-to-32`; the i386 build's behaviour is untouched, checked
+   by its own guest still running. The fs layer below the syscall boundary
+   — fs ops, realfs, fakefs, tmpfs, ttys, poll, locks — and `util/`,
+   `platform/` and `main.c` need nothing.
 2. **The address space.** `struct mem` becomes a four-level table over the
    47-bit user half; `mem_next_page` skips empty subtrees at every level;
    `pt_find_hole` walks from the top skipping full and empty subtrees rather
    than scanning pages (a linear scan of 2^35 pages is not an option); the TLB
-   keys on 64-bit pages. mmap's layout constants become x86-64's (`mmap_base`
-   below the stack, `TASK_SIZE` 0x7ffffffff000).
+   keys on 64-bit pages, and `BAD_PAGE` (0x10000, a real page number) becomes
+   a sentinel no page can be. Every loop to `MEM_PAGES` becomes a walk of
+   what is mapped: `mem_destroy`, `mm_copy`'s CoW of the whole space,
+   `/proc/pid/maps` (which also prints `%08x`), `mem_coredump`, and
+   `mem_ptr`'s search for the grows-down mapping above a stack fault, which
+   scans page by page today (`kernel/memory.c:244-250`). mmap's layout
+   becomes x86-64's: `mmap_base` below the stack, the stack top at
+   0x7ffffffff000, the PIE bias 0x555555554000 rather than 0x56555000
+   (`exec.c:226`). And `struct mmu` stops holding asbestos: the five places
+   `kernel/memory.c` calls it (create, free, invalidate on write) become
+   engine hooks, so each engine is told of a written or remapped page.
 3. **The engine.** `emu/blink/`: the interpreter-only subset of blink's
-   sources, built with no JIT, no fork, no metal; a `Machine` per task; memory
-   accesses through the translate hook; `syscall` returning `INT_SYSCALL`.
-   `cpu_state` gains the x86-64 register file for the guest, or wraps the
-   `Machine`.
-4. **exec and a first guest.** ELF64 in `kernel/exec.c`: program headers,
-   `PT_INTERP`, an 8-byte argv/envp/auxv stack, the x86-64 initial
-   registers. The x86-64 syscall table (`syscall`, args in rdi, rsi, rdx, r10,
+   sources (the decoder, `machine.c`'s dispatch, the ALU, string, stack,
+   x87, SSE and BMI2 ops, `bus.c` for LOCK), built with `-DDISABLE_JIT
+   -DNOLINEAR -DNDEBUG -DDISABLE_METAL` and blink's own `config.h` ahead of
+   libarchive's on the include path. Dropped: `syscall.c`, `signal.c`, the
+   VFS and its fds, the loader, `blink.c`, `demangle.c` (it forks c++filt).
+   The glue replaces five things:
+   - **`LookupAddress2`** (`memory.c`) becomes iSH's translate: guest
+     address and intent in, host pointer or a fault out, through iSH's TLB
+     and `mem_ptr`. Every interpreter access reaches it once linear memory
+     is off, so blink's page tables are never built — and neither is
+     `g_hostpages`, blink's unlocked host-page array.
+   - **`HaltMachine`** and the rest of `throw.c` record the trap and fault
+     address, rewind the ip where upstream does, clear `m->stashaddr` (a
+     fault between a cross-page stash and its commit otherwise writes stale
+     data on the next instruction) and `siglongjmp` back to
+     `cpu_run_to_interrupt` — never `DeliverSignalToUser`, which can end the
+     host process.
+   - **`OpSyscall`** longjmps out with `INT_SYSCALL`; iSH's kernel answers
+     in rax. RCX and R11 are set as real SYSCALL sets them.
+   - **The write intent.** `ReserveAddress` asks for write permission, but
+     pushes, `BeginStore`, string and moffs stores, vector stores and the
+     cmpxchg8b/16b pointers resolve with read intent and write through it.
+     Each of those call sites passes write intent, or a CoW page is written
+     in place under another process.
+   - **Stubs** for what the dropped files provided: `CheckForSignals`,
+     `TerminateSignal`, `UnXlatSignal`, `UnXlatSiCode`,
+     `UnlockRobustFutexes`, `InitFds`, `DestroyFds`.
+
+   Faults in blink are not restartable: a push moves RSP before touching
+   memory. So every fault a guest is meant to survive — CoW, stack growth,
+   a lazily backed page — is resolved inside the translate, which is where
+   iSH's `mem_ptr` already does it; only a real SIGSEGV leaves the
+   interpreter. Signals arrive between instructions: the kernel delivers
+   them only when the CPU comes back, and for a guest that never makes a
+   syscall that is asbestos's periodic `INT_TIMER` (`calls.c:318`), so the
+   blink engine returns `INT_TIMER` every N instructions as well. `cpu_state` for this guest is the blink `Machine`
+   — register file, flags through `ExportFlags`/`ImportFlags`, `fs.base`
+   for TLS — with the kernel reaching it through accessors rather than
+   fields.
+
+   Blink's own changes (the translate hook, the write intents) are commits
+   on a `ByteRepair/blink` fork the submodule then follows, under the same
+   never-force-push rule as this branch; everything else is iSH-side glue.
+4. **exec and a first guest.** ELF64 in `kernel/exec.c` and `elf.h`
+   (ELFCLASS64, EM_X86_64; ELF64 moves `p_flags` and reorders `Elf_Sym`):
+   program headers, `PT_INTERP`, an 8-byte argv/envp stack, 16-byte auxv
+   entries without i386's `AT_SYSINFO`, `AT_PLATFORM` "x86_64", and the
+   x86-64 initial registers — r8 to r15 zeroed, mxcsr 0x1f80. The x86-64 syscall table (`syscall`, args in rdi, rsi, rdx, r10,
    r8, r9, number in rax), starting with write and exit_group. **Done when**
    `tests/blinkish/hello.S` prints under `ish`.
-5. **Enough ABI for musl.** `arch_prctl` (FS base for TLS), the 64-bit
-   layouts of stat, timespec, iovec, sigaction, rlimit, statfs, sysinfo,
-   msghdr, epoll_event, dirent64; mmap with a page offset rather than
-   mmap2's; pread/pwrite/ftruncate/lseek without split 64-bit pairs; no
-   socketcall or ipc multiplexers; `uname -m` x86_64. **Done when** the
+5. **Enough ABI for musl.** `arch_prctl` (FS base for TLS; today a stub
+   at `kernel/misc.c:27`), and the x86-64 layouts of what differs: `stat`
+   (144 bytes, its own field order — `newfstatat`, no stat64), `statfs`
+   (all longs, no statfs64), `linux_dirent`, `flock` (unpacked, 32 bytes),
+   `iovec`, `msghdr`/`cmsghdr` (size_t lengths, 8-byte alignment),
+   `sigaction` (unpacked, long flags), `stack_t`, `siginfo` (128 bytes,
+   8-aligned), the timespec family and `rusage`, `sysinfo`,
+   `robust_list_head`. `epoll_event`, `statx`, `pollfd`, `ucred`, termios
+   and `rlimit` are already right. mmap takes six arguments and a byte
+   offset; pread/pwrite/ftruncate/fallocate/lseek take whole 64-bit
+   offsets; `SO_RCVTIMEO`/`SO_SNDTIMEO` are 20 and 21, not i386's 66 and
+   67. Left in the i386 build alone: socketcall and ipc, mmap2 and
+   old_mmap, the `*32` uid calls, `fcntl64`, `_llseek`, `waitpid`,
+   rlimit32, `set_thread_area`, sigreturn. `uname -m` x86_64. **Done when** the
    Alpine x86_64 busybox runs through `ld-musl-x86_64.so.1`.
-6. **clone, fork and signals.** Copy the `Machine` on fork and clone; the
-   x86-64 `rt_sigframe` with its `ucontext` and fxsave-format `fpstate`,
-   `SA_RESTORER`, `rt_sigreturn`. **Done when** `busybox sh -c` runs
+6. **clone, fork and signals.** Copy the `Machine` on fork and clone —
+   x86-64's clone takes `(flags, stack, ptid, ctid, tls)`, not i386's
+   order, and `CLONE_SETTLS` sets the FS base rather than a `user_desc`.
+   The x86-64 `rt_sigframe` (`{pretcode, ucontext, siginfo}`, the fxsave
+   area 64-byte aligned, a 128-byte red zone skipped, rdi/rsi/rdx = sig,
+   info, uc), returning through the libc's `SA_RESTORER` rather than a
+   vdso trampoline, and `rt_sigreturn`. The FP and SSE state is saved and
+   restored around a handler: i386 iSH never did (`signal.c:173`, "TODO"),
+   which mostly went unnoticed there, but on x86-64 every float is in an
+   xmm register. **Done when** `busybox sh -c` runs
    pipelines and `trap` works.
 7. **A whole Alpine.** No vdso at first (musl falls back to syscalls when
    `AT_SYSINFO_EHDR` is absent), an x86-64 vdso later if time calls show up in
@@ -137,13 +224,23 @@ blinkish than under blink is a bug in the port until shown otherwise.
   a switch. The gap is unmeasured, and it is the number milestone 9 exists to
   produce. Blink's own per-page instruction caching is worth keeping if the
   seam allows it.
-- **Blink's globals.** The interpreter must be safe with one `Machine` per
-  guest thread, many at once, in one process; anything it keeps globally
-  (flags, the bus lock, signal state) is either made per-machine or held to
-  the read-only.
-- **Self-modifying code.** iSH invalidates its gadget cache when a page is
-  written; blink's decode caching needs the same notification from the
-  memory layer.
+- **Blink's globals.** One `Machine` per guest thread is blink's own
+  threading model, so many at once is supported; what stays global is the
+  `g_bus` LOCK stripes (shared, which keeps LOCK atomic over shared
+  memory), the read-only `FLAG_*`, and the thread-local `g_machine`, set
+  once per task thread. An assertion in blink ends the process, which is
+  why the build is `NDEBUG`.
+- **ptrace.** `user_regs_struct`, PEEKUSER's `struct user` and 8-byte
+  PEEK/POKE words are x86-64's to write; nothing in the milestones needs
+  them, so ptrace stays i386-only until something does (gdb, strace).
+- **x87 precision.** Blink keeps x87 registers as doubles, not 80-bit
+  extended, so `long double` arithmetic loses precision against real
+  hardware. Most of Alpine never notices; numerics that test for it will.
+  iSH's `float80` is the fix if one is needed.
+- **Self-modifying code.** Blink's instruction cache checks the opcode
+  bytes on every hit, so a rewritten instruction is never run stale; what
+  needs invalidating on a remap is its cached code page
+  (`ResetInstructionCache`), from iSH's TLB flush.
 - **The upstream merge.** Every file a milestone touches is a file an
   upstream change can conflict with. Arch-specific code goes in new files
   where it can, and the shared files change by `#if GUEST_X86_64` blocks
