@@ -218,6 +218,106 @@ static void setup_rt_sigframe(struct siginfo_ *info, struct rt_sigframe_ *frame)
 
 #endif
 
+#if GUEST_X86_64
+
+// blink keeps x87 registers as doubles; the fxsave area stores them 80-bit
+// extended. These convert between the two, exactly for everything a double
+// holds (a double is a subset of extended); a subnormal double is flushed to
+// zero, which loses only values a guest rarely produces and blink's own x87
+// would not round-trip anyway.
+static void dbl_to_f80(double d, qword_t *sig, word_t *sexp) {
+    uint64_t b;
+    memcpy(&b, &d, sizeof(b));
+    uint64_t sign = b >> 63;
+    uint32_t e = (b >> 52) & 0x7ff;
+    uint64_t f = b & 0xfffffffffffffULL;
+    uint64_t s;
+    uint16_t x;
+    if (e == 0x7ff) {
+        s = f ? 0xc000000000000000ULL | (f >> 1) : 0x8000000000000000ULL;
+        x = 0x7fff;
+    } else if (e == 0 && f == 0) {
+        s = 0;
+        x = 0;
+    } else if (e == 0) {
+        s = 0; // subnormal double, flushed to zero (see above)
+        x = 0;
+    } else {
+        s = (f | 0x10000000000000ULL) << 11;
+        x = (uint16_t) (e - 1023 + 16383);
+    }
+    *sig = s;
+    *sexp = (word_t) ((sign << 15) | x);
+}
+
+static double f80_to_dbl(qword_t s, word_t sexp) {
+    uint64_t sign = (uint64_t) (sexp >> 15);
+    uint32_t x = sexp & 0x7fff;
+    uint64_t b;
+    if (x == 0x7fff) {
+        uint64_t f = (s & 0x7fffffffffffffffULL) >> 11;
+        b = (sign << 63) | (0x7ffULL << 52) | f;
+    } else if (x == 0 || s == 0) {
+        b = sign << 63;
+    } else {
+        int64_t e = (int64_t) x - 16383 + 1023;
+        if (e >= 0x7ff) {
+            b = (sign << 63) | (0x7ffULL << 52);
+        } else if (e <= 0) {
+            b = sign << 63;
+        } else {
+            uint64_t f = (s >> 11) & 0xfffffffffffffULL;
+            b = (sign << 63) | ((uint64_t) e << 52) | f;
+        }
+    }
+    double d;
+    memcpy(&d, &b, sizeof(d));
+    return d;
+}
+
+// Fill the frame from the current registers; the fxsave area is separate and
+// 16-byte aligned below the frame, its guest address written into the
+// sigcontext once the frame is placed. pretcode is the handler's SA_RESTORER.
+static void setup_rt_sigframe_64(struct siginfo_ *info, struct rt_sigframe_64 *frame,
+                                  struct fpstate_64 *fp) {
+    struct sigaction_ *action = &current->sighand->action[info->sig];
+    struct x86_64_regs *r = &current->cpu.r;
+
+    frame->pretcode = action->restorer;
+    frame->uc.flags = 0;
+    frame->uc.link = 0;
+    altstack_to_user(current->sighand, &frame->uc.stack);
+
+    struct sigcontext_64 *sc = &frame->uc.mcontext;
+    sc->r8 = r->gpr[8]; sc->r9 = r->gpr[9]; sc->r10 = r->gpr[10]; sc->r11 = r->gpr[11];
+    sc->r12 = r->gpr[12]; sc->r13 = r->gpr[13]; sc->r14 = r->gpr[14]; sc->r15 = r->gpr[15];
+    sc->rdi = r->gpr[7]; sc->rsi = r->gpr[6]; sc->rbp = r->gpr[5]; sc->rbx = r->gpr[3];
+    sc->rdx = r->gpr[2]; sc->rax = r->gpr[0]; sc->rcx = r->gpr[1]; sc->rsp = r->gpr[4];
+    sc->rip = r->rip;
+    sc->eflags = r->rflags;
+    sc->cs = sc->gs = sc->fs = sc->ss = 0;
+    sc->err = 0;
+    sc->trapno = current->cpu.trapno;
+    sc->oldmask = current->blocked;
+    sc->cr2 = current->cpu.trapno == INT_GPF ? current->cpu.segfault_addr : 0;
+    sc->fpstate = 0; // the guest address, written once the frame is placed
+    memset(sc->reserved1, 0, sizeof(sc->reserved1));
+    frame->uc.sigmask = current->blocked;
+    frame->info = *info;
+
+    memset(fp, 0, sizeof(*fp));
+    fp->cw = r->x87.cw;
+    fp->sw = r->x87.sw;
+    fp->tw = r->x87.tw;
+    fp->mxcsr = r->mxcsr;
+    fp->mxcsr_mask = 0xffff;
+    for (int i = 0; i < 8; i++)
+        dbl_to_f80(r->x87.st[i], &fp->st[i].significand, &fp->st[i].signexp);
+    memcpy(fp->xmm, r->xmm, sizeof(r->xmm));
+}
+
+#endif
+
 static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
     int sig = info->sig;
     STRACE("%d receiving signal %d\n", current->pid, sig);
@@ -240,8 +340,47 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
 
     struct sigaction_ *action = &sighand->action[info->sig];
 #if GUEST_X86_64
-    (void) action;
-    die("%d: signal %d has a handler, and x86-64 signal frames are milestone 6", current->pid, info->sig);
+    struct x86_64_regs *r = &current->cpu.r;
+    addr_t sp = r->rsp;
+    if (sighand->altstack && !is_on_altstack(sp, sighand))
+        sp = sighand->altstack + sighand->altstack_size;
+
+    // The frame sits below the current stack, its pretcode at the top so the
+    // handler's `ret` pops the restorer; the fxsave area is 16-byte aligned
+    // below the frame. rsp is the frame start, exactly as Linux enters a
+    // handler, so [rsp] is the return address (pretcode).
+    struct rt_sigframe_64 frame;
+    struct fpstate_64 fp;
+    setup_rt_sigframe_64(info, &frame, &fp);
+
+    sp -= sizeof(frame);
+    sp &= ~0xfULL; // the frame is 16-byte aligned
+    addr_t frame_addr = sp;
+    sp -= sizeof(fp);
+    sp &= ~0xfULL;
+    addr_t fp_guest = sp;
+    frame.uc.mcontext.fpstate = fp_guest;
+    r->rsp = frame_addr;
+
+    if (user_write(frame_addr, &frame, sizeof(frame)) || user_write(fp_guest, &fp, sizeof(fp))) {
+        printk("failed to install frame for %d at %#llx\n", info->sig, (unsigned long long) frame_addr);
+        deliver_signal(current, SIGSEGV_, SIGINFO_NIL);
+        return;
+    }
+
+    // rdi/rsi/rdx = sig, info, ucontext; rip = the handler.
+    r->gpr[7] = info->sig;                                      // rdi
+    r->gpr[6] = frame_addr + offsetof(struct rt_sigframe_64, info); // rsi
+    r->gpr[2] = frame_addr + offsetof(struct rt_sigframe_64, uc);   // rdx
+    r->rip = action->handler;
+
+    // The mask: the signal is blocked during the handler unless SA_NODEFER.
+    if (!(action->flags & SA_NODEFER_))
+        sigset_add(&current->blocked, info->sig);
+    current->blocked |= action->mask;
+
+    if (action->flags & SA_RESETHAND_)
+        *action = (struct sigaction_) {.handler = SIG_DFL_};
 #else
     bool need_siginfo = action->flags & SA_SIGINFO_;
 
@@ -390,8 +529,57 @@ void receive_signals(void) {
 
 #if GUEST_X86_64
 
+static void restore_sigcontext_64(struct sigcontext_64 *sc, struct cpu_state *cpu) {
+    struct x86_64_regs *r = &cpu->r;
+    r->gpr[8] = sc->r8; r->gpr[9] = sc->r9; r->gpr[10] = sc->r10; r->gpr[11] = sc->r11;
+    r->gpr[12] = sc->r12; r->gpr[13] = sc->r13; r->gpr[14] = sc->r14; r->gpr[15] = sc->r15;
+    r->gpr[7] = sc->rdi; r->gpr[6] = sc->rsi; r->gpr[5] = sc->rbp; r->gpr[3] = sc->rbx;
+    r->gpr[2] = sc->rdx; r->gpr[0] = sc->rax; r->gpr[1] = sc->rcx; r->gpr[4] = sc->rsp;
+    r->rip = sc->rip;
+    r->rflags = sc->eflags;
+}
+
 slong_t sys_rt_sigreturn(void) {
-    die("%d: rt_sigreturn, and x86-64 signal frames are milestone 6", current->pid);
+    struct cpu_state *cpu = &current->cpu;
+    struct x86_64_regs *r = &cpu->r;
+
+    // rsp points past pretcode (the handler's `ret` popped it), so the frame
+    // starts offsetof(uc) below it, exactly as i386's reads its frame.
+    addr_t frame_addr = r->rsp - offsetof(struct rt_sigframe_64, uc);
+    struct rt_sigframe_64 frame;
+    if (user_get(frame_addr, frame)) {
+        deliver_signal(current, SIGSEGV_, SIGINFO_NIL);
+        return _EFAULT;
+    }
+
+    restore_sigcontext_64(&frame.uc.mcontext, cpu);
+
+    // The fxsave area was saved below the frame; restore the fpu and xmm
+    // registers from it when a handler's guest code touched them.
+    if (frame.uc.mcontext.fpstate != 0) {
+        struct fpstate_64 fp;
+        if (user_get(frame.uc.mcontext.fpstate, fp)) {
+            deliver_signal(current, SIGSEGV_, SIGINFO_NIL);
+            return _EFAULT;
+        }
+        r->x87.cw = fp.cw;
+        r->x87.sw = fp.sw;
+        r->x87.tw = fp.tw;
+        r->mxcsr = fp.mxcsr;
+        for (int i = 0; i < 8; i++)
+            r->x87.st[i] = f80_to_dbl(fp.st[i].significand, fp.st[i].signexp);
+        memcpy(r->xmm, fp.xmm, sizeof(r->xmm));
+    }
+
+    lock(&current->sighand->lock);
+    if (!is_on_altstack(r->rsp, current->sighand) &&
+            frame.uc.stack.size >= MINSIGSTKSZ_) {
+        current->sighand->altstack = frame.uc.stack.stack;
+        current->sighand->altstack_size = frame.uc.stack.size;
+    }
+    sigmask_set(frame.uc.sigmask);
+    unlock(&current->sighand->lock);
+    return r->gpr[0];
 }
 
 slong_t sys_sigreturn(void) {

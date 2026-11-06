@@ -298,4 +298,56 @@ struct rt_sigframe_ {
 extern int xsave_extra;
 extern int fxsave_extra;
 
+#if GUEST_X86_64
+
+// x86-64's signal frame, laid out as Linux's so a guest's libc can read the
+// ucontext a handler gets in rdx and return through the SA_RESTORER written
+// into pretcode. There is no vdso, so the restorer is always libc's.
+struct sigcontext_64 {
+    qword_t r8, r9, r10, r11, r12, r13, r14, r15;
+    qword_t rdi, rsi, rbp, rbx, rdx, rax, rcx, rsp;
+    qword_t rip;
+    qword_t eflags;
+    word_t cs, gs, fs, ss;
+    qword_t err;
+    qword_t trapno;
+    qword_t oldmask;
+    qword_t cr2;
+    qword_t fpstate; // a host pointer into the frame's fxsave area
+    qword_t reserved1[8];
+};
+
+// The fxsave area: 512 bytes, 16-byte aligned in the frame, Linux's exact
+// _fpstate_64. x87 registers are 80-bit extended (16 bytes each); the xmm
+// space holds all sixteen vector registers. blink keeps x87 as doubles, so a
+// save widens them back to 80-bit form (still only double precision, the
+// documented blink limit). The sw_reserved tail stays zero: no xstate header,
+// so a guest sees a legacy frame.
+struct fpstate_64 {
+    word_t cw, sw, tw, fop;
+    qword_t rip, rdp;
+    dword_t mxcsr, mxcsr_mask;
+    struct { qword_t significand; word_t signexp; word_t pad[3]; } st[8];
+    struct { qword_t lo, hi; } xmm[16];
+    byte_t reserved[96];
+};
+static_assert(sizeof(struct fpstate_64) == 512, "fxsave area is 512 bytes");
+
+struct ucontext_64 {
+    qword_t flags;
+    qword_t link;
+    struct stack_t_ stack; // already guest-width from milestone 5
+    struct sigcontext_64 mcontext;
+    sigset_t_ sigmask;
+};
+
+struct rt_sigframe_64 {
+    qword_t pretcode;
+    struct ucontext_64 uc;
+    struct siginfo_ info;
+    // the fxsave area follows, 16-byte aligned
+};
+
+#endif
+
 #endif
