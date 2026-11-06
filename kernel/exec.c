@@ -356,7 +356,9 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     addr_t p = sp;
 
     // argc
-    if (user_put(p, argv.count))
+    // argc is a guest word: a size_t would write past it into argv[0].
+    dword_t argc_word = argv.count;
+    if (user_put(p, argc_word))
         return _EFAULT;
     p += sizeof(dword_t);
 
