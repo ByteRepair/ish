@@ -314,7 +314,7 @@ runnable on the macOS harness (below) before the next begins.
 
 Nothing in a milestone needs iOS until 8. On macOS:
 
-    meson setup build-x86_64 -Dguest=x86_64
+    meson setup build-x86_64 -Dguest=x86_64 -Dengine=blink
     ninja -C build-x86_64
     build-x86_64/ish -r <x86_64 rootfs> /bin/busybox sh
 
