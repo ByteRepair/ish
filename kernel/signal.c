@@ -397,7 +397,7 @@ static void restore_sigcontext(struct sigcontext_ *context, struct cpu_state *cp
     cpu->eflags = (context->flags & USE_FLAGS) | (cpu->eflags & ~USE_FLAGS);
 }
 
-dword_t sys_rt_sigreturn(void) {
+slong_t sys_rt_sigreturn(void) {
     struct cpu_state *cpu = &current->cpu;
     struct rt_sigframe_ frame;
     // esp points past the first field of the frame
@@ -419,7 +419,7 @@ dword_t sys_rt_sigreturn(void) {
     return cpu->eax;
 }
 
-dword_t sys_sigreturn(void) {
+slong_t sys_sigreturn(void) {
     struct cpu_state *cpu = &current->cpu;
     struct sigframe_ frame;
     // esp points past the first two fields of the frame
@@ -476,7 +476,7 @@ static int do_sigaction(int sig, const struct sigaction_ *action, struct sigacti
     return 0;
 }
 
-dword_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr, dword_t sigset_size) {
+slong_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr, ulong_t sigset_size) {
     if (sigset_size != sizeof(sigset_t_))
         return _EINVAL;
     struct sigaction_ action, oldaction;
@@ -499,7 +499,7 @@ dword_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_ad
     return err;
 }
 
-dword_t sys_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr) {
+slong_t sys_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr) {
     return sys_rt_sigaction(signum, action_addr, oldaction_addr, 1);
 }
 
@@ -531,7 +531,7 @@ static int do_sigprocmask(dword_t how, sigset_t_ set) {
     return 0;
 }
 
-dword_t sys_rt_sigprocmask(dword_t how, addr_t set_addr, addr_t oldset_addr, dword_t size) {
+slong_t sys_rt_sigprocmask(dword_t how, addr_t set_addr, addr_t oldset_addr, ulong_t size) {
     if (size != sizeof(sigset_t_))
         return _EINVAL;
 
@@ -559,7 +559,7 @@ dword_t sys_rt_sigprocmask(dword_t how, addr_t set_addr, addr_t oldset_addr, dwo
     return 0;
 }
 
-int_t sys_rt_sigpending(addr_t set_addr) {
+slong_t sys_rt_sigpending(addr_t set_addr) {
     STRACE("rt_sigpending(%#x)");
     // as defined by the standard
     sigset_t_ pending = current->pending & current->blocked;
@@ -582,7 +582,7 @@ static void altstack_to_user(struct sighand *sighand, struct stack_t_ *user_stac
         user_stack->flags |= SS_ONSTACK_;
 }
 
-dword_t sys_sigaltstack(addr_t ss_addr, addr_t old_ss_addr) {
+slong_t sys_sigaltstack(addr_t ss_addr, addr_t old_ss_addr) {
     STRACE("sigaltstack(0x%x, 0x%x)", ss_addr, old_ss_addr);
     struct sighand *sighand = current->sighand;
     lock(&sighand->lock);
@@ -617,7 +617,7 @@ dword_t sys_sigaltstack(addr_t ss_addr, addr_t old_ss_addr) {
     return 0;
 }
 
-int_t sys_rt_sigsuspend(addr_t mask_addr, uint_t size) {
+slong_t sys_rt_sigsuspend(addr_t mask_addr, ulong_t size) {
     if (size != sizeof(sigset_t_))
         return _EINVAL;
     sigset_t_ mask;
@@ -634,7 +634,7 @@ int_t sys_rt_sigsuspend(addr_t mask_addr, uint_t size) {
     return _EINTR;
 }
 
-int_t sys_pause(void) {
+slong_t sys_pause(void) {
     lock(&current->sighand->lock);
     while (wait_for(&current->pause, &current->sighand->lock, NULL) != _EINTR)
         continue;
@@ -642,7 +642,7 @@ int_t sys_pause(void) {
     return _EINTR;
 }
 
-int_t sys_rt_sigtimedwait(addr_t set_addr, addr_t info_addr, addr_t timeout_addr, uint_t set_size) {
+slong_t sys_rt_sigtimedwait(addr_t set_addr, addr_t info_addr, addr_t timeout_addr, ulong_t set_size) {
     if (set_size != sizeof(sigset_t_))
         return _EINVAL;
     sigset_t_ set;
@@ -773,15 +773,15 @@ static int do_kill(pid_t_ pid, dword_t sig, pid_t_ tgid) {
     return err;
 }
 
-dword_t sys_kill(pid_t_ pid, dword_t sig) {
+slong_t sys_kill(pid_t_ pid, dword_t sig) {
     return do_kill(pid, sig, 0);
 }
-dword_t sys_tgkill(pid_t_ tgid, pid_t_ tid, dword_t sig) {
+slong_t sys_tgkill(pid_t_ tgid, pid_t_ tid, dword_t sig) {
     if (tid <= 0 || tgid <= 0)
         return _EINVAL;
     return do_kill(tid, sig, tgid);
 }
-dword_t sys_tkill(pid_t_ tid, dword_t sig) {
+slong_t sys_tkill(pid_t_ tid, dword_t sig) {
     if (tid <= 0)
         return _EINVAL;
     return do_kill(tid, sig, 0);

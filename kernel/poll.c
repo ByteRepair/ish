@@ -105,7 +105,7 @@ static dword_t select_common(fd_t nfds, addr_t readfds_addr, addr_t writefds_add
     return err;
 }
 
-dword_t sys_select(fd_t nfds, addr_t readfds_addr, addr_t writefds_addr, addr_t exceptfds_addr, addr_t timeout_addr) {
+slong_t sys_select(fd_t nfds, addr_t readfds_addr, addr_t writefds_addr, addr_t exceptfds_addr, addr_t timeout_addr) {
     struct timespec timeout_ts = {};
     struct timespec *timeout_ts_addr = NULL;
     if (timeout_addr != 0) {
@@ -138,7 +138,7 @@ static int poll_event_callback(void *context, int types, union poll_fd_info info
     }
     return res;
 }
-dword_t sys_poll(addr_t fds, dword_t nfds, int_t timeout) {
+slong_t sys_poll(addr_t fds, ulong_t nfds, int_t timeout) {
     STRACE("poll(0x%x, %d, %d)", fds, nfds, timeout);
     // polls is sized by nfds on the host stack: bound it first, as Linux does
     if (nfds > rlimit(RLIMIT_NOFILE_))
@@ -193,7 +193,7 @@ dword_t sys_poll(addr_t fds, dword_t nfds, int_t timeout) {
         if (polls[i].fd >= 0 && files[i] == NULL)
             polls[i].revents = POLL_NVAL;
     }
-    struct poll_context context = {polls, files, nfds};
+    struct poll_context context = {polls, files, (int) nfds};
     struct timespec timeout_ts;
     if (timeout >= 0) {
         timeout_ts.tv_sec = timeout / 1000;
@@ -217,7 +217,7 @@ dword_t sys_poll(addr_t fds, dword_t nfds, int_t timeout) {
     return res;
 }
 
-dword_t sys_pselect(fd_t nfds, addr_t readfds_addr, addr_t writefds_addr, addr_t exceptfds_addr, addr_t timeout_addr, addr_t sigmask_addr) {
+slong_t sys_pselect(fd_t nfds, addr_t readfds_addr, addr_t writefds_addr, addr_t exceptfds_addr, addr_t timeout_addr, addr_t sigmask_addr) {
     struct timespec_ timeout_timespec;
     struct timespec timeout_ts;
     struct timespec *timeout_ts_addr = NULL;
@@ -246,7 +246,7 @@ dword_t sys_pselect(fd_t nfds, addr_t readfds_addr, addr_t writefds_addr, addr_t
     return select_common(nfds, readfds_addr, writefds_addr, exceptfds_addr, timeout_ts_addr, "pselect");
 }
 
-dword_t sys_ppoll(addr_t fds, dword_t nfds, addr_t timeout_addr, addr_t sigmask_addr, dword_t sigsetsize) {
+slong_t sys_ppoll(addr_t fds, ulong_t nfds, addr_t timeout_addr, addr_t sigmask_addr, ulong_t sigsetsize) {
     int timeout = -1;
     if (timeout_addr != 0) {
         struct timespec_ timeout_timespec;

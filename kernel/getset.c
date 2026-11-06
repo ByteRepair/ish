@@ -2,15 +2,15 @@
 #include "kernel/task.h"
 #include "kernel/personality.h"
 
-pid_t_ sys_getpid(void) {
+slong_t sys_getpid(void) {
     STRACE("getpid()");
     return current->tgid;
 }
-pid_t_ sys_gettid(void) {
+slong_t sys_gettid(void) {
     STRACE("gettid()");
     return current->pid;
 }
-pid_t_ sys_getppid(void) {
+slong_t sys_getppid(void) {
     STRACE("getppid()");
     pid_t_ ppid;
     lock(&pids_lock);
@@ -22,25 +22,25 @@ pid_t_ sys_getppid(void) {
     return ppid;
 }
 
-dword_t sys_getuid32(void) {
+slong_t sys_getuid32(void) {
     STRACE("getuid32()");
     return current->uid;
 }
-dword_t sys_getuid(void) {
+slong_t sys_getuid(void) {
     STRACE("getuid()");
     return current->uid & 0xffff;
 }
 
-dword_t sys_geteuid32(void) {
+slong_t sys_geteuid32(void) {
     STRACE("geteuid32()");
     return current->euid;
 }
-dword_t sys_geteuid(void) {
+slong_t sys_geteuid(void) {
     STRACE("geteuid()");
     return current->euid & 0xffff;
 }
 
-int_t sys_setuid(uid_t_ uid) {
+slong_t sys_setuid(uid_t_ uid) {
     STRACE("setuid(%d)", uid);
     if (superuser()) {
         current->uid = current->suid = uid;
@@ -52,7 +52,7 @@ int_t sys_setuid(uid_t_ uid) {
     return 0;
 }
 
-dword_t sys_setresuid(uid_t_ ruid, uid_t_ euid, uid_t_ suid) {
+slong_t sys_setresuid(uid_t_ ruid, uid_t_ euid, uid_t_ suid) {
     STRACE("setresuid(%d, %d, %d)", ruid, euid, suid);
     if (!superuser()) {
         if (ruid != (uid_t) -1 && ruid != current->uid && ruid != current->euid && ruid != current->suid)
@@ -72,7 +72,7 @@ dword_t sys_setresuid(uid_t_ ruid, uid_t_ euid, uid_t_ suid) {
     return 0;
 }
 
-int_t sys_getresuid(addr_t ruid_addr, addr_t euid_addr, addr_t suid_addr) {
+slong_t sys_getresuid(addr_t ruid_addr, addr_t euid_addr, addr_t suid_addr) {
     STRACE("getresuid(%#x, %#x, %#x)", ruid_addr, euid_addr, suid_addr);
     if (user_put(ruid_addr, current->uid))
         return _EFAULT;
@@ -83,29 +83,29 @@ int_t sys_getresuid(addr_t ruid_addr, addr_t euid_addr, addr_t suid_addr) {
     return 0;
 }
 
-int_t sys_setreuid(uid_t_ ruid, uid_t_ euid) {
+slong_t sys_setreuid(uid_t_ ruid, uid_t_ euid) {
     return sys_setresuid(ruid, euid, -1);
 }
 
-dword_t sys_getgid32(void) {
+slong_t sys_getgid32(void) {
     STRACE("getgid32()");
     return current->gid;
 }
-dword_t sys_getgid(void) {
+slong_t sys_getgid(void) {
     STRACE("getgid()");
     return current->gid & 0xffff;
 }
 
-dword_t sys_getegid32(void) {
+slong_t sys_getegid32(void) {
     STRACE("getegid32()");
     return current->egid;
 }
-dword_t sys_getegid(void) {
+slong_t sys_getegid(void) {
     STRACE("getegid()");
     return current->egid & 0xffff;
 }
 
-int_t sys_setgid(uid_t_ gid) {
+slong_t sys_setgid(uid_t_ gid) {
     STRACE("setgid(%d)", gid);
     if (superuser()) {
         current->gid = current->sgid = gid;
@@ -117,7 +117,7 @@ int_t sys_setgid(uid_t_ gid) {
     return 0;
 }
 
-dword_t sys_setresgid(uid_t_ rgid, uid_t_ egid, uid_t_ sgid) {
+slong_t sys_setresgid(uid_t_ rgid, uid_t_ egid, uid_t_ sgid) {
     STRACE("setresgid(%d, %d, %d)", rgid, egid, sgid);
     if (!superuser()) {
         if (rgid != (uid_t) -1 && rgid != current->gid && rgid != current->egid && rgid != current->sgid)
@@ -137,7 +137,7 @@ dword_t sys_setresgid(uid_t_ rgid, uid_t_ egid, uid_t_ sgid) {
     return 0;
 }
 
-int_t sys_getresgid(addr_t rgid_addr, addr_t egid_addr, addr_t sgid_addr) {
+slong_t sys_getresgid(addr_t rgid_addr, addr_t egid_addr, addr_t sgid_addr) {
     STRACE("getresgid(%#x, %#x, %#x)", rgid_addr, egid_addr, sgid_addr);
     if (user_put(rgid_addr, current->gid))
         return _EFAULT;
@@ -148,11 +148,11 @@ int_t sys_getresgid(addr_t rgid_addr, addr_t egid_addr, addr_t sgid_addr) {
     return 0;
 }
 
-int_t sys_setregid(uid_t_ rgid, uid_t_ egid) {
+slong_t sys_setregid(uid_t_ rgid, uid_t_ egid) {
     return sys_setresgid(rgid, egid, -1);
 }
 
-int_t sys_getgroups(dword_t size, addr_t list) {
+slong_t sys_getgroups(dword_t size, addr_t list) {
     STRACE("getgroups(%d, %#x)", size, list);
     if (size == 0)
         return current->ngroups;
@@ -165,7 +165,7 @@ int_t sys_getgroups(dword_t size, addr_t list) {
     return current->ngroups;
 }
 
-int_t sys_setgroups(dword_t size, addr_t list) {
+slong_t sys_setgroups(dword_t size, addr_t list) {
     STRACE("setgroups(%d, %#x)", size, list);
     if (size > MAX_GROUPS)
         return _EINVAL;
@@ -178,17 +178,17 @@ int_t sys_setgroups(dword_t size, addr_t list) {
 }
 
 // this does not really work
-int_t sys_capget(addr_t header_addr, addr_t data_addr) {
+slong_t sys_capget(addr_t header_addr, addr_t data_addr) {
     STRACE("capget(%#x, %#x)", header_addr, data_addr);
     return 0;
 }
-int_t sys_capset(addr_t header_addr, addr_t data_addr) {
+slong_t sys_capset(addr_t header_addr, addr_t data_addr) {
     STRACE("capset(%#x, %#x)", header_addr, data_addr);
     return 0;
 }
 
 // minimal version according to Linux sys/personality.h
-int_t sys_personality(dword_t persona) {
+slong_t sys_personality(dword_t persona) {
     STRACE("personality(%#x)", persona);
     // Get the personality
     if (persona == 0xffffffff)

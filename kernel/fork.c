@@ -136,7 +136,7 @@ fail_free_mem:
     return err;
 }
 
-dword_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t ctid) {
+slong_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t ctid) {
     STRACE("clone(0x%x, 0x%x, 0x%x, 0x%x, 0x%x)", flags, stack, ptid, tls, ctid);
     if (flags & ~CSIGNAL_ & ~IMPLEMENTED_FLAGS) {
         FIXME("unimplemented clone flags 0x%x", flags & ~CSIGNAL_ & ~IMPLEMENTED_FLAGS);
@@ -196,11 +196,11 @@ dword_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t c
     return pid;
 }
 
-dword_t sys_fork(void) {
+slong_t sys_fork(void) {
     return sys_clone(SIGCHLD_, 0, 0, 0, 0);
 }
 
-dword_t sys_vfork(void) {
+slong_t sys_vfork(void) {
     return sys_clone(CLONE_VFORK_ | CLONE_VM_ | SIGCHLD_, 0, 0, 0, 0);
 }
 

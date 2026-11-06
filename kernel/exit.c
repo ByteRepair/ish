@@ -181,12 +181,12 @@ static void halt_system(void) {
     unlock(&mounts_lock);
 }
 
-dword_t sys_exit(dword_t status) {
+slong_t sys_exit(dword_t status) {
     STRACE("exit(%d)\n", status);
     do_exit(status << 8);
 }
 
-dword_t sys_exit_group(dword_t status) {
+slong_t sys_exit_group(dword_t status) {
     STRACE("exit_group(%d)\n", status);
     do_exit_group(status << 8);
 }
@@ -345,7 +345,7 @@ error:
     return err;
 }
 
-dword_t sys_waitid(int_t idtype, pid_t_ id, addr_t info_addr, int_t options) {
+slong_t sys_waitid(int_t idtype, pid_t_ id, addr_t info_addr, int_t options) {
     STRACE("waitid(%d, %d, %#x, %#x)", idtype, id, info_addr, options);
     struct siginfo_ info = {};
     int_t res = do_wait(idtype, id, &info, NULL, options);
@@ -356,7 +356,7 @@ dword_t sys_waitid(int_t idtype, pid_t_ id, addr_t info_addr, int_t options) {
     return 0;
 }
 
-dword_t sys_wait4(pid_t_ id, addr_t status_addr, dword_t options, addr_t rusage_addr) {
+slong_t sys_wait4(pid_t_ id, addr_t status_addr, dword_t options, addr_t rusage_addr) {
     STRACE("wait4(%d, %#x, %#x, %#x)", id, status_addr, options, rusage_addr);
     if (options & WNOWAIT_)
         return _EINVAL;
@@ -386,6 +386,6 @@ dword_t sys_wait4(pid_t_ id, addr_t status_addr, dword_t options, addr_t rusage_
     return info.child.pid;
 }
 
-dword_t sys_waitpid(pid_t_ pid, addr_t status_addr, dword_t options) {
+slong_t sys_waitpid(pid_t_ pid, addr_t status_addr, dword_t options) {
     return sys_wait4(pid, status_addr, options, 0);
 }

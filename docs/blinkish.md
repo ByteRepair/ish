@@ -76,7 +76,7 @@ runnable on the macOS harness (below) before the next begins.
 0. **Groundwork** — done. The fork, blink at `deps/blink`, the read-only
    mounts commit, a macOS harness, the test guests, and stock blink as the
    oracle.
-0½. **Bugs found on the way**, each its own commit, fixed in the i386 build
+0½. **Bugs found on the way** — done. Each its own commit, fixed in the i386 build
    before anything moves (and offerable upstream): mmap's non-fixed hint
    that is not a hole maps over what is there (`kernel/mmap.c:59-61`);
    mremap dereferences the NULL it tests for (`mmap.c:163`); exec stores
@@ -84,8 +84,11 @@ runnable on the macOS harness (below) before the next begins.
    fcntl's SETLK64 tests the wrong wait constants (`fs/fd.c:369,375`); a
    forked task inherits the parent's `poked_ptr` (`kernel/task.c:59`);
    pread/pwrite take an `off_t_` through `dword_t` slots (`kernel/fs.c:417,
-   454`).
-1. **The build switch and 64-bit types.** `-Dguest`/`-Dengine=blink` in
+   454`). Milestone 1's type work turned up two more: lseek took its offset
+   unsigned, so a seek backwards went to just under 4 GiB, and poll sized a
+   host stack array by the guest's nfds, which a large one crashed. Each
+   fix carries a guest under `tests/regress/` that fails without it.
+1. **The build switch and 64-bit types** — done. `-Dguest`/`-Dengine=blink` in
    meson. Not a global widening: `uint_t`, `int_t` and `dword_t` each stand
    for a C `int` in some places and a `long`, `size_t` or pointer in
    others, and socklen, flags, fds, futex words, ioctl ints and pids stay
@@ -96,9 +99,17 @@ runnable on the macOS harness (below) before the next begins.
    takes six guest longs and returns one, so mmap and brk can answer above
    4 GiB and an error sign-extends into rax (`calls.h:258`,
    `calls.c:271-273`, and the socketcall table at `fs/sock.c:1201`, which
-   reuses the type). The kernel compiles clean for x86_64 with
-   `-Wshorten-64-to-32`; the i386 build's behaviour is untouched, checked
-   by its own guest still running. The fs layer below the syscall boundary
+   reuses the type). Parameters were retyped by position against the
+   x86-64 Linux signatures — sizes, lengths, offsets and `unsigned long`
+   arguments — which also caught `getsockopt` taking its length pointer
+   as a `dword_t`. The i386 build's code is unchanged by all of it, checked
+   by disassembling every kernel object before and after: the only
+   differences are the two fixes above and two assert line numbers. The
+   x86_64 kernel library compiles; what `-Wshorten-64-to-32` still flags
+   there (22 sites) is all in the i386 register file and frames that
+   milestones 3, 4 and 6 replace — `cpu->eax` taking the syscall result,
+   the auxv entries and initial registers in exec, `cpu.esp` in fork, and
+   the signal frames. The fs layer below the syscall boundary
    — fs ops, realfs, fakefs, tmpfs, ttys, poll, locks — and `util/`,
    `platform/` and `main.c` need nothing.
 2. **The address space.** `struct mem` becomes a four-level table over the

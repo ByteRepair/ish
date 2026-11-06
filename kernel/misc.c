@@ -4,7 +4,7 @@
 #define PRCTL_SET_KEEPCAPS_ 8
 #define PRCTL_SET_NAME_ 15
 
-int_t sys_prctl(dword_t option, uint_t arg2, uint_t UNUSED(arg3), uint_t UNUSED(arg4), uint_t UNUSED(arg5)) {
+slong_t sys_prctl(dword_t option, ulong_t arg2, ulong_t UNUSED(arg3), ulong_t UNUSED(arg4), ulong_t UNUSED(arg5)) {
     switch (option) {
         case PRCTL_SET_KEEPCAPS_:
             // stub
@@ -24,7 +24,7 @@ int_t sys_prctl(dword_t option, uint_t arg2, uint_t UNUSED(arg3), uint_t UNUSED(
     }
 }
 
-int_t sys_arch_prctl(int_t code, addr_t addr) {
+slong_t sys_arch_prctl(int_t code, addr_t addr) {
     STRACE("arch_prctl(%#x, %#x)", code, addr);
     return _EINVAL;
 }
@@ -38,7 +38,7 @@ int_t sys_arch_prctl(int_t code, addr_t addr) {
 #define REBOOT_CMD_CAD_OFF 0
 #define REBOOT_CMD_CAD_ON 0x89abcdef
 
-int_t sys_reboot(int_t magic, int_t magic2, int_t cmd) {
+slong_t sys_reboot(int_t magic, int_t magic2, int_t cmd) {
     STRACE("reboot(%#x, %d, %d)", magic, magic2, cmd);
     if (!superuser())
         return _EPERM;

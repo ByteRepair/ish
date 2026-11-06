@@ -28,7 +28,7 @@ void do_uname(struct uname *uts) {
     strcpy(uts->domain, "(none)");
 }
 
-dword_t sys_uname(addr_t uts_addr) {
+slong_t sys_uname(addr_t uts_addr) {
     struct uname uts;
     do_uname(&uts);
     if (user_put(uts_addr, uts))
@@ -36,7 +36,7 @@ dword_t sys_uname(addr_t uts_addr) {
     return 0;
 }
 
-dword_t sys_sethostname(addr_t UNUSED(hostname_addr), dword_t UNUSED(hostname_len)) {
+slong_t sys_sethostname(addr_t UNUSED(hostname_addr), dword_t UNUSED(hostname_len)) {
     return _EPERM;
 }
 
@@ -66,7 +66,7 @@ static void sysinfo_specific(struct sys_info *info) {
 }
 #endif
 
-dword_t sys_sysinfo(addr_t info_addr) {
+slong_t sys_sysinfo(addr_t info_addr) {
     struct sys_info info = {0};
     struct uptime_info uptime = get_uptime();
     info.uptime = uptime.uptime_ticks;

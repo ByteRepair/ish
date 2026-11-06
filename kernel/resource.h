@@ -34,10 +34,10 @@ struct rlimit32_ {
 #define RLIMIT_RTTIME_ 15
 #define RLIMIT_NLIMITS_ 16
 
-dword_t sys_getrlimit32(dword_t resource, addr_t rlim_addr);
-dword_t sys_setrlimit32(dword_t resource, addr_t rlim_addr);
-dword_t sys_prlimit64(pid_t_ pid, dword_t resource, addr_t new_limit_addr, addr_t old_limit_addr);
-dword_t sys_old_getrlimit32(dword_t resource, addr_t rlim_addr);
+slong_t sys_getrlimit32(dword_t resource, addr_t rlim_addr);
+slong_t sys_setrlimit32(dword_t resource, addr_t rlim_addr);
+slong_t sys_prlimit64(pid_t_ pid, dword_t resource, addr_t new_limit_addr, addr_t old_limit_addr);
+slong_t sys_old_getrlimit32(dword_t resource, addr_t rlim_addr);
 
 rlim_t_ rlimit(int resource);
 
@@ -64,19 +64,19 @@ struct rusage_ rusage_get_current(void);
 void rusage_add(struct rusage_ *dst, struct rusage_ *src);
 #define RUSAGE_SELF_ 0
 #define RUSAGE_CHILDREN_ -1
-dword_t sys_getrusage(dword_t who, addr_t rusage_addr);
+slong_t sys_getrusage(dword_t who, addr_t rusage_addr);
 
-int_t sys_sched_getaffinity(pid_t_ pid, dword_t cpusetsize, addr_t cpuset_addr);
-int_t sys_sched_setaffinity(pid_t_ pid, dword_t cpusetsize, addr_t cpuset_addr);
-int_t sys_getpriority(int_t which, pid_t_ who);
-int_t sys_setpriority(int_t which, pid_t_ who, int_t prio);
+slong_t sys_sched_getaffinity(pid_t_ pid, dword_t cpusetsize, addr_t cpuset_addr);
+slong_t sys_sched_setaffinity(pid_t_ pid, dword_t cpusetsize, addr_t cpuset_addr);
+slong_t sys_getpriority(int_t which, pid_t_ who);
+slong_t sys_setpriority(int_t which, pid_t_ who, int_t prio);
 
-int_t sys_sched_getparam(pid_t_ pid, addr_t param_addr);
-int_t sys_sched_getscheduler(pid_t_ UNUSED(pid));
-int_t sys_sched_setscheduler(pid_t_ UNUSED(pid), int_t policy, addr_t param_addr);
-int_t sys_sched_get_priority_max(int_t policy);
+slong_t sys_sched_getparam(pid_t_ pid, addr_t param_addr);
+slong_t sys_sched_getscheduler(pid_t_ UNUSED(pid));
+slong_t sys_sched_setscheduler(pid_t_ UNUSED(pid), int_t policy, addr_t param_addr);
+slong_t sys_sched_get_priority_max(int_t policy);
 
-int_t sys_ioprio_set(int_t UNUSED(which), int_t UNUSED(who), int_t UNUSED(ioprio));
-int_t sys_ioprio_get(int_t UNUSED(which), int_t UNUSED(who), int_t UNUSED(ioprio));
+slong_t sys_ioprio_set(int_t UNUSED(which), int_t UNUSED(who), int_t UNUSED(ioprio));
+slong_t sys_ioprio_get(int_t UNUSED(which), int_t UNUSED(who), int_t UNUSED(ioprio));
 
 #endif

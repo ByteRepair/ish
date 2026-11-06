@@ -147,17 +147,17 @@ struct sighand *sighand_new(void);
 struct sighand *sighand_copy(struct sighand *sighand);
 void sighand_release(struct sighand *sighand);
 
-dword_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr, dword_t sigset_size);
-dword_t sys_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr);
-dword_t sys_rt_sigreturn(void);
-dword_t sys_sigreturn(void);
+slong_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr, ulong_t sigset_size);
+slong_t sys_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr);
+slong_t sys_rt_sigreturn(void);
+slong_t sys_sigreturn(void);
 
 #define SIG_BLOCK_ 0
 #define SIG_UNBLOCK_ 1
 #define SIG_SETMASK_ 2
 typedef uint64_t sigset_t_;
-dword_t sys_rt_sigprocmask(dword_t how, addr_t set, addr_t oldset, dword_t size);
-int_t sys_rt_sigpending(addr_t set_addr);
+slong_t sys_rt_sigprocmask(dword_t how, addr_t set, addr_t oldset, ulong_t size);
+slong_t sys_rt_sigpending(addr_t set_addr);
 
 static inline sigset_t_ sig_mask(int sig) {
     assert(sig >= 1 && sig < NUM_SIGS);
@@ -182,15 +182,15 @@ struct stack_t_ {
 #define SS_ONSTACK_ 1
 #define SS_DISABLE_ 2
 #define MINSIGSTKSZ_ 2048
-dword_t sys_sigaltstack(addr_t ss, addr_t old_ss);
+slong_t sys_sigaltstack(addr_t ss, addr_t old_ss);
 
-int_t sys_rt_sigsuspend(addr_t mask_addr, uint_t size);
-int_t sys_pause(void);
-int_t sys_rt_sigtimedwait(addr_t set_addr, addr_t info_addr, addr_t timeout_addr, uint_t set_size);
+slong_t sys_rt_sigsuspend(addr_t mask_addr, ulong_t size);
+slong_t sys_pause(void);
+slong_t sys_rt_sigtimedwait(addr_t set_addr, addr_t info_addr, addr_t timeout_addr, ulong_t set_size);
 
-dword_t sys_kill(pid_t_ pid, dword_t sig);
-dword_t sys_tkill(pid_t_ tid, dword_t sig);
-dword_t sys_tgkill(pid_t_ tgid, pid_t_ tid, dword_t sig);
+slong_t sys_kill(pid_t_ pid, dword_t sig);
+slong_t sys_tkill(pid_t_ tid, dword_t sig);
+slong_t sys_tgkill(pid_t_ tgid, pid_t_ tid, dword_t sig);
 
 // signal frame structs. There's a good chance this should go in its own header file
 

@@ -65,7 +65,7 @@ static void set_user_regs(struct cpu_state *cpu, struct user_regs_struct_ *user_
 //  cpu->xss = user_regs_->xss;
 }
 
-dword_t sys_ptrace(dword_t request, dword_t pid, addr_t addr, dword_t data) {
+slong_t sys_ptrace(dword_t request, dword_t pid, addr_t addr, ulong_t data) {
     switch (request) {
         case PTRACE_TRACEME_:
             STRACE("ptrace(PTRACE_TRACEME, %d, %#x, %#x)", pid, addr, data);

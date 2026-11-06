@@ -3,8 +3,8 @@
 
 #include "misc.h"
 
-// top 20 bits of an address, i.e. address >> 12
-typedef dword_t page_t;
+// an address >> 12: 20 bits of an i386 address, 35 of an x86-64 one
+typedef ulong_t page_t;
 #define BAD_PAGE 0x10000
 
 #ifndef __KERNEL__
@@ -13,7 +13,7 @@ typedef dword_t page_t;
 #define PAGE_SIZE (1 << PAGE_BITS)
 #define PAGE(addr) ((addr) >> PAGE_BITS)
 #define PGOFFSET(addr) ((addr) & (PAGE_SIZE - 1))
-typedef dword_t pages_t;
+typedef ulong_t pages_t;
 // bytes MUST be unsigned if you would like this to overflow to zero
 #define PAGE_ROUND_UP(bytes) (PAGE((bytes) + PAGE_SIZE - 1))
 #define MEM_PAGES (1 << 20) // at least on 32-bit

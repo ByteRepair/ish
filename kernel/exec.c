@@ -27,11 +27,11 @@ struct exec_args {
     const char *args;
 };
 
-static inline dword_t align_stack(dword_t sp);
-static inline ssize_t user_strlen(dword_t p);
-static inline int user_memset(addr_t start, byte_t val, dword_t len);
-static inline dword_t copy_string(dword_t sp, const char *string);
-static inline dword_t args_copy(dword_t sp, struct exec_args args);
+static inline addr_t align_stack(addr_t sp);
+static inline ssize_t user_strlen(addr_t p);
+static inline int user_memset(addr_t start, byte_t val, ulong_t len);
+static inline addr_t copy_string(addr_t sp, const char *string);
+static inline addr_t args_copy(addr_t sp, struct exec_args args);
 static size_t args_size(struct exec_args args);
 
 static int read_header(struct fd *fd, struct elf_header *header) {
@@ -95,7 +95,7 @@ static int load_entry(struct prg_header ph, addr_t bias, struct fd *fd) {
 
     if (memsize > filesize) {
         // put zeroes between addr + filesize and addr + memsize, call that bss
-        dword_t bss_size = memsize - filesize;
+        ulong_t bss_size = memsize - filesize;
 
         // first zero the tail from the end of the file mapping to the end
         // of the load entry or the end of the page, whichever comes first
@@ -437,18 +437,18 @@ static size_t args_size(struct exec_args args) {
     return args_end - args.args;
 }
 
-static inline dword_t align_stack(addr_t sp) {
+static inline addr_t align_stack(addr_t sp) {
     return sp &~ 0xf;
 }
 
-static inline dword_t copy_string(addr_t sp, const char *string) {
+static inline addr_t copy_string(addr_t sp, const char *string) {
     sp -= strlen(string) + 1;
     if (user_write_string(sp, string))
         return 0;
     return sp;
 }
 
-static inline dword_t args_copy(addr_t sp, struct exec_args args) {
+static inline addr_t args_copy(addr_t sp, struct exec_args args) {
     size_t size = args_size(args);
     sp -= size;
     if (user_write(sp, args.args, size))
@@ -467,7 +467,7 @@ static inline ssize_t user_strlen(addr_t p) {
     return i - 1;
 }
 
-static inline int user_memset(addr_t start, byte_t val, dword_t len) {
+static inline int user_memset(addr_t start, byte_t val, ulong_t len) {
     while (len--)
         if (user_put(start++, val))
             return 1;
@@ -676,7 +676,7 @@ static ssize_t user_read_string_array(addr_t addr, char *buf, size_t max) {
     return i;
 }
 
-dword_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
+slong_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
     char filename[MAX_PATH];
     if (user_read_string(filename_addr, filename, sizeof(filename)))
         return _EFAULT;

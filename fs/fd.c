@@ -213,7 +213,7 @@ int f_close(fd_t f) {
     return err;
 }
 
-dword_t sys_close(fd_t f) {
+slong_t sys_close(fd_t f) {
     STRACE("close(%d)", f);
     return f_close(f);
 }
@@ -241,7 +241,7 @@ void fdtable_do_cloexec(struct fdtable *table) {
 
 #define F_DUPFD_CLOEXEC_ 1030
 
-dword_t sys_dup(fd_t f) {
+slong_t sys_dup(fd_t f) {
     STRACE("dup(%d)", f);
     struct fd *fd = f_get(f);
     if (fd == NULL)
@@ -250,7 +250,7 @@ dword_t sys_dup(fd_t f) {
     return f_install(fd, 0);
 }
 
-dword_t sys_dup3(fd_t f, fd_t new_f, int_t flags) {
+slong_t sys_dup3(fd_t f, fd_t new_f, int_t flags) {
     STRACE("dup3(%d, %d, %d)", f, new_f, flags);
     struct fdtable *table = current->files;
     struct fd *fd = f_get(f);
@@ -267,7 +267,7 @@ dword_t sys_dup3(fd_t f, fd_t new_f, int_t flags) {
     return new_f;
 }
 
-dword_t sys_dup2(fd_t f, fd_t new_f) {
+slong_t sys_dup2(fd_t f, fd_t new_f) {
     return sys_dup3(f, new_f, 0);
 }
 
@@ -285,7 +285,7 @@ int fd_setflags(struct fd *fd, int flags) {
     return 0;
 }
 
-dword_t sys_fcntl(fd_t f, dword_t cmd, dword_t arg) {
+slong_t sys_fcntl(fd_t f, dword_t cmd, ulong_t arg) {
     struct fdtable *table = current->files;
     struct fd *fd = f_get(f);
     if (fd == NULL)
@@ -298,12 +298,12 @@ dword_t sys_fcntl(fd_t f, dword_t cmd, dword_t arg) {
         case F_DUPFD_:
             STRACE("fcntl(%d, F_DUPFD, %d)", f, arg);
             fd->refcount++;
-            return f_install_start(fd, arg);
+            return f_install_start(fd, (fd_t) arg);
 
         case F_DUPFD_CLOEXEC_:
             STRACE("fcntl(%d, F_DUPFD_CLOEXEC, %d)", f, arg);
             fd->refcount++;
-            new_f = f_install_start(fd, arg);
+            new_f = f_install_start(fd, (fd_t) arg);
             bit_set(new_f, table->cloexec);
             return new_f;
 
@@ -323,7 +323,7 @@ dword_t sys_fcntl(fd_t f, dword_t cmd, dword_t arg) {
             return fd_getflags(fd);
         case F_SETFL_:
             STRACE("fcntl(%d, F_SETFL, %#x)", f, arg);
-            return fd_setflags(fd, arg);
+            return fd_setflags(fd, (int) arg);
 
         case F_GETLK_:
             STRACE("fcntl(%d, F_GETLK, %#x)", f, arg);
@@ -381,7 +381,7 @@ dword_t sys_fcntl(fd_t f, dword_t cmd, dword_t arg) {
     }
 }
 
-dword_t sys_fcntl32(fd_t fd, dword_t cmd, dword_t arg) {
+slong_t sys_fcntl32(fd_t fd, dword_t cmd, ulong_t arg) {
     switch (cmd) {
         case F_GETLK64_:
         case F_SETLK64_:

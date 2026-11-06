@@ -99,7 +99,7 @@ struct dyn_ent {
 
 struct elf_sym {
     uint32_t name;
-    addr_t value;
+    dword_t value;
     dword_t size;
     byte_t info;
     byte_t other;

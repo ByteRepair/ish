@@ -9,24 +9,24 @@
 #include "misc.h"
 #include "debug.h"
 
-int_t sys_socketcall(dword_t call_num, addr_t args_addr);
+slong_t sys_socketcall(dword_t call_num, addr_t args_addr);
 
-int_t sys_socket(dword_t domain, dword_t type, dword_t protocol);
-int_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
-int_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
-int_t sys_listen(fd_t sock_fd, int_t backlog);
-int_t sys_accept(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_socketpair(dword_t domain, dword_t type, dword_t protocol, addr_t sockets_addr);
-int_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, addr_t sockaddr_addr, dword_t sockaddr_len);
-int_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_shutdown(fd_t sock_fd, dword_t how);
-int_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t value_len);
-int_t sys_getsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t len_addr);
-int_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
-int_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
-int_t sys_sendmmsg(fd_t sock_fd, addr_t msgvec_addr, uint_t msgvec_len, int_t flags);
+slong_t sys_socket(dword_t domain, dword_t type, dword_t protocol);
+slong_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
+slong_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
+slong_t sys_listen(fd_t sock_fd, int_t backlog);
+slong_t sys_accept(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_socketpair(dword_t domain, dword_t type, dword_t protocol, addr_t sockets_addr);
+slong_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, ulong_t len, dword_t flags, addr_t sockaddr_addr, dword_t sockaddr_len);
+slong_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, ulong_t len, dword_t flags, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_shutdown(fd_t sock_fd, dword_t how);
+slong_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t value_len);
+slong_t sys_getsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, addr_t len_addr);
+slong_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
+slong_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
+slong_t sys_sendmmsg(fd_t sock_fd, addr_t msgvec_addr, uint_t msgvec_len, int_t flags);
 
 #define SOCKADDR_DATA_MAX 108
 

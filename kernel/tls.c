@@ -31,12 +31,12 @@ int task_set_thread_area(struct task *task, addr_t u_info) {
     return 0;
 }
 
-int sys_set_thread_area(addr_t u_info) {
+slong_t sys_set_thread_area(addr_t u_info) {
     STRACE("set_thread_area(0x%x)", u_info);
     return task_set_thread_area(current, u_info);
 }
 
-int sys_set_tid_address(addr_t tid) {
+slong_t sys_set_tid_address(addr_t tid) {
     current->clear_tid = tid;
     return sys_getpid();
 }

@@ -10,7 +10,7 @@ __asm__(".data\n"
         ".incbin \"vdso/libvdso.so.elf\"\n"
         ".skip "str(VDSO_PAGES)" * (1 << 12) - (. - vdso_data)\n");
 
-int vdso_symbol(const char *name) {
+addr_t vdso_symbol(const char *name) {
     struct elf_header *header = (void *) vdso_data;
     struct prg_header *ph = (void *) ((char *) header + header->prghead_off);
 

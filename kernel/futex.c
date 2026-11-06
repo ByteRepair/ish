@@ -152,7 +152,7 @@ int futex_wake(addr_t uaddr, dword_t wake_max) {
     return futex_wakelike(FUTEX_WAKE_, uaddr, wake_max, 0, 0);
 }
 
-dword_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2, addr_t uaddr2, dword_t val3) {
+slong_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2, addr_t uaddr2, dword_t val3) {
     if (!(op & FUTEX_PRIVATE_FLAG_)) {
         STRACE("!FUTEX_PRIVATE ");
     }
@@ -173,7 +173,8 @@ dword_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2,
             return futex_wakelike(op & FUTEX_CMD_MASK_, uaddr, val, 0, 0);
         case FUTEX_REQUEUE_:
             STRACE("futex(FUTEX_REQUEUE, %#x, %d, %#x)", uaddr, val, uaddr2);
-            return futex_wakelike(op & FUTEX_CMD_MASK_, uaddr, val, timeout_or_val2, uaddr2);
+            // the timeout slot carries val2 here, cast down as Linux does
+            return futex_wakelike(op & FUTEX_CMD_MASK_, uaddr, val, (dword_t) timeout_or_val2, uaddr2);
     }
     STRACE("futex(%#x, %d, %d, timeout=%#x, %#x, %d) ", uaddr, op, val, timeout_or_val2, uaddr2, val3);
     FIXME("unsupported futex operation %d", op);
@@ -186,7 +187,7 @@ struct robust_list_head_ {
     addr_t list_op_pending;
 };
 
-int_t sys_set_robust_list(addr_t robust_list, dword_t len) {
+slong_t sys_set_robust_list(addr_t robust_list, ulong_t len) {
     STRACE("set_robust_list(%#x, %d)", robust_list, len);
     if (len != sizeof(struct robust_list_head_))
         return _EINVAL;
@@ -194,7 +195,7 @@ int_t sys_set_robust_list(addr_t robust_list, dword_t len) {
     return 0;
 }
 
-int_t sys_get_robust_list(pid_t_ pid, addr_t robust_list_ptr, addr_t len_ptr) {
+slong_t sys_get_robust_list(pid_t_ pid, addr_t robust_list_ptr, addr_t len_ptr) {
     STRACE("get_robust_list(%d, %#x, %#x)", pid, robust_list_ptr, len_ptr);
 
     lock(&pids_lock);

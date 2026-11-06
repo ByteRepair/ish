@@ -129,7 +129,7 @@ void task_start(struct task *task) {
         die("could not create thread");
 }
 
-int_t sys_sched_yield(void) {
+slong_t sys_sched_yield(void) {
     STRACE("sched_yield()");
     sched_yield();
     return 0;

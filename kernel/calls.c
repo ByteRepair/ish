@@ -6,16 +6,16 @@
 #include "kernel/signal.h"
 #include "kernel/task.h"
 
-dword_t syscall_stub(void) {
+slong_t syscall_stub(void) {
     return _ENOSYS;
 }
 // While identical, this version of the stub doesn't log below. Use this for
 // syscalls that are optional (i.e. fallback on something else) but called
 // frequently.
-dword_t syscall_silent_stub(void) {
+slong_t syscall_silent_stub(void) {
     return _ENOSYS;
 }
-dword_t syscall_success_stub(void) {
+slong_t syscall_success_stub(void) {
     return 0;
 }
 
@@ -268,7 +268,7 @@ void handle_interrupt(int interrupt) {
                 printk("%d(%s) stub syscall %d\n", current->pid, current->comm, syscall_num);
             }
             STRACE("%d call %-3d ", current->pid, syscall_num);
-            int result = syscall_table[syscall_num](cpu->ebx, cpu->ecx, cpu->edx, cpu->esi, cpu->edi, cpu->ebp);
+            slong_t result = syscall_table[syscall_num](cpu->ebx, cpu->ecx, cpu->edx, cpu->esi, cpu->edi, cpu->ebp);
             STRACE(" = 0x%x\n", result);
             cpu->eax = result;
         }

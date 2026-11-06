@@ -119,7 +119,7 @@ addr_t sys_mmap(addr_t args_addr) {
     return mmap_common(args.addr, args.len, args.prot, args.flags, args.fd, args.offset);
 }
 
-int_t sys_munmap(addr_t addr, uint_t len) {
+slong_t sys_munmap(addr_t addr, ulong_t len) {
     STRACE("munmap(0x%x, 0x%x)", addr, len);
     if (PGOFFSET(addr) != 0)
         return _EINVAL;
@@ -136,7 +136,7 @@ int_t sys_munmap(addr_t addr, uint_t len) {
 #define MREMAP_MAYMOVE_ 1
 #define MREMAP_FIXED_ 2
 
-int_t sys_mremap(addr_t addr, dword_t old_len, dword_t new_len, dword_t flags) {
+slong_t sys_mremap(addr_t addr, ulong_t old_len, ulong_t new_len, ulong_t flags) {
     STRACE("mremap(%#x, %#x, %#x, %d)", addr, old_len, new_len, flags);
     if (PGOFFSET(addr) != 0)
         return _EINVAL;
@@ -180,7 +180,7 @@ int_t sys_mremap(addr_t addr, dword_t old_len, dword_t new_len, dword_t flags) {
     return addr;
 }
 
-int_t sys_mprotect(addr_t addr, uint_t len, int_t prot) {
+slong_t sys_mprotect(addr_t addr, ulong_t len, int_t prot) {
     STRACE("mprotect(0x%x, 0x%x, 0x%x)", addr, len, prot);
     if (PGOFFSET(addr) != 0)
         return _EINVAL;
@@ -193,21 +193,21 @@ int_t sys_mprotect(addr_t addr, uint_t len, int_t prot) {
     return err;
 }
 
-dword_t sys_madvise(addr_t UNUSED(addr), dword_t UNUSED(len), dword_t UNUSED(advice)) {
+slong_t sys_madvise(addr_t UNUSED(addr), ulong_t UNUSED(len), dword_t UNUSED(advice)) {
     // portable applications should not rely on linux's destructive semantics for MADV_DONTNEED.
     return 0;
 }
 
-dword_t sys_mbind(addr_t UNUSED(addr), dword_t UNUSED(len), int_t UNUSED(mode),
-        addr_t UNUSED(nodemask), dword_t UNUSED(maxnode), uint_t UNUSED(flags)) {
+slong_t sys_mbind(addr_t UNUSED(addr), ulong_t UNUSED(len), int_t UNUSED(mode),
+        addr_t UNUSED(nodemask), ulong_t UNUSED(maxnode), uint_t UNUSED(flags)) {
     return 0;
 }
 
-int_t sys_mlock(addr_t UNUSED(addr), dword_t UNUSED(len)) {
+slong_t sys_mlock(addr_t UNUSED(addr), ulong_t UNUSED(len)) {
     return 0;
 }
 
-int_t sys_msync(addr_t UNUSED(addr), dword_t UNUSED(len), int_t UNUSED(flags)) {
+slong_t sys_msync(addr_t UNUSED(addr), ulong_t UNUSED(len), int_t UNUSED(flags)) {
     return 0;
 }
 
