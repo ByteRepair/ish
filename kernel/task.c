@@ -56,8 +56,12 @@ struct task *task_create_(struct task *parent) {
     if (task == NULL)
         return NULL;
     *task = (struct task) {};
-    if (parent != NULL)
+    if (parent != NULL) {
         *task = *parent;
+        // The copy points at the parent's poke flag, which a poke meant for
+        // the child would set and which dangles once the parent is gone.
+        task->cpu.poked_ptr = &task->cpu._poked;
+    }
     task->pid = pid->id;
     pid->task = task;
 
