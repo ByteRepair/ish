@@ -9,6 +9,7 @@
 #include "fs/dev.h"
 #include "kernel/task.h"
 #include "kernel/errno.h"
+#include "kernel/calls.h"
 
 struct mount *find_mount_and_trim_path(char *path) {
     struct mount *mount = mount_find(path);
@@ -18,6 +19,12 @@ struct mount *find_mount_and_trim_path(char *path) {
         *dst++ = *src++;
     *dst = '\0';
     return mount;
+}
+
+// Entoli: a mount made read-only refuses whatever would change it. Linux
+// does; iSH recorded the flag and only ever showed it in /proc/mounts.
+static bool read_only(struct mount *mount) {
+    return mount->flags & MS_READONLY_;
 }
 
 bool contains_mount_point(const char *path) {
@@ -42,6 +49,10 @@ struct fd *generic_openat(struct fd *at, const char *path_raw, int flags, int mo
     if (err < 0)
         return ERR_PTR(err);
     struct mount *mount = find_mount_and_trim_path(path);
+    if (read_only(mount) && (flags & (O_WRONLY_ | O_RDWR_ | O_CREAT_ | O_TRUNC_))) {
+        mount_release(mount);
+        return ERR_PTR(_EROFS);
+    }
     struct fd *fd = mount->fs->open(mount, path, flags, mode);
     if (IS_ERR(fd)) {
         // if an error happens after this point, fd_close will release the
@@ -143,6 +154,8 @@ int generic_linkat(struct fd *src_at, const char *src_raw, struct fd *dst_at, co
     struct mount *dst_mount = find_mount_and_trim_path(dst);
     if (mount != dst_mount)
         err = _EXDEV;
+    else if (read_only(mount))
+        err = _EROFS;
     else if (mount->fs->link == NULL)
         err = _EPERM;
     else
@@ -158,8 +171,8 @@ int generic_unlinkat(struct fd *at, const char *path_raw) {
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(path);
-    err = _EPERM;
-    if (mount->fs->unlink)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->unlink)
         err = mount->fs->unlink(mount, path);
     mount_release(mount);
     return err;
@@ -180,6 +193,8 @@ int generic_renameat(struct fd *src_at, const char *src_raw, struct fd *dst_at, 
     struct mount *dst_mount = find_mount_and_trim_path(dst);
     if (mount != dst_mount)
         err = _EXDEV;
+    else if (read_only(mount))
+        err = _EROFS;
     else if (mount->fs->rename == NULL)
         err = _EPERM;
     else
@@ -195,8 +210,8 @@ int generic_symlinkat(const char *target, struct fd *at, const char *link_raw) {
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(link);
-    err = _EPERM;
-    if (mount->fs->symlink)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->symlink)
         err = mount->fs->symlink(mount, target, link);
     mount_release(mount);
     return err;
@@ -213,8 +228,8 @@ int generic_mknodat(struct fd *at, const char *path_raw, mode_t_ mode, dev_t_ de
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(path);
-    err = _EPERM;
-    if (mount->fs->mknod)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->mknod)
         err = mount->fs->mknod(mount, path, mode, dev);
     mount_release(mount);
     return err;
@@ -226,8 +241,8 @@ int generic_setattrat(struct fd *at, const char *path_raw, struct attr attr, boo
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(path);
-    err = _EPERM;
-    if (mount->fs->setattr)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->setattr)
         err = mount->fs->setattr(mount, path, attr);
     mount_release(mount);
     return err;
@@ -239,8 +254,8 @@ int generic_utime(struct fd *at, const char *path_raw, struct timespec atime, st
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(path);
-    err = _EPERM;
-    if (mount->fs->utime)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->utime)
         err = mount->fs->utime(mount, path, atime, mtime);
     mount_release(mount);
     return err;
@@ -265,8 +280,8 @@ int generic_mkdirat(struct fd *at, const char *path_raw, mode_t_ mode) {
     if (err < 0)
         return err;
     struct mount *mount = find_mount_and_trim_path(path);
-    err = _EPERM;
-    if (mount->fs->mkdir)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->mkdir)
         err = mount->fs->mkdir(mount, path, mode);
     mount_release(mount);
     return err;
@@ -280,8 +295,8 @@ int generic_rmdirat(struct fd *at, const char *path_raw) {
     if (contains_mount_point(path))
         return _EBUSY;
     struct mount *mount = find_mount_and_trim_path(path);
-    err = _EPERM;
-    if (mount->fs->rmdir)
+    err = read_only(mount) ? _EROFS : _EPERM;
+    if (!read_only(mount) && mount->fs->rmdir)
         err = mount->fs->rmdir(mount, path);
     mount_release(mount);
     return err;

@@ -798,6 +798,9 @@ dword_t sys_utime(addr_t path_addr, addr_t times_addr) {
 }
 
 static int generic_fsetattr(struct fd *fd, struct attr attr) {
+    // Entoli: fchmod and ftruncate too, through a read-only mount.
+    if (fd->mount->flags & MS_READONLY_)
+        return _EROFS;
     if (fd->mount->fs->fsetattr == NULL)
         return _EPERM;
     return fd->mount->fs->fsetattr(fd, attr);
