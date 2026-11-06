@@ -141,7 +141,7 @@ runnable on the macOS harness (below) before the next begins.
    index masked so a 64-bit address stays in the table. `BAD_PAGE` is all
    ones. `/proc/pid/maps` also stopped running a region on across an
    unmapped gap a whole directory wide.
-3. **The engine.** `emu/blink/`: the interpreter-only subset of blink's
+3. **The engine** — done. `emu/blink/`: the interpreter-only subset of blink's
    sources (the decoder, `machine.c`'s dispatch, the ALU, string, stack,
    x87, SSE and BMI2 ops, `bus.c` for LOCK), built with `-DDISABLE_JIT
    -DNOLINEAR -DNDEBUG -DDISABLE_METAL` and blink's own `config.h` ahead of
@@ -183,8 +183,40 @@ runnable on the macOS harness (below) before the next begins.
    fields.
 
    Blink's own changes (the translate hook, the write intents) are commits
-   on a `ByteRepair/blink` fork the submodule then follows, under the same
+   on the `blinkish` branch of `ByteRepair/blink`, which `deps/blink` follows, under the same
    never-force-push rule as this branch; everything else is iSH-side glue.
+
+   As built: the engine is two files that cannot share headers, joined by
+   `emu/blink/glue.h` in plain types. `interp.c` is blink's side — the
+   translate hook, the halt path, `OpSyscall`, and stubs for what blink's
+   own run loop and page-table walk reach, which abort if ever reached;
+   `engine.c` is iSH's — `cpu_run_to_interrupt` and the memory hooks. The
+   kernel holds `struct x86_64_regs` (`emu/x86_64.h`, nothing but
+   `stdint.h`) and the engine copies it into a per-thread `Machine` for
+   each run and back. The kernel reaches registers through `CPU_IP`,
+   `CPU_SP`, `CPU_SYSCALL_NR`, `CPU_SYSCALL_ARGS` and the like, which
+   expand to i386's field names unchanged, so the i386 build's code is
+   unchanged but for a SIGFPE branch blink needs and asbestos never takes.
+   The translate goes through iSH's TLB and on a miss through `mem_ptr`,
+   and flushes the TLB when that changed a mapping — after a CoW copy, a
+   cached read entry would otherwise still point at the shared page. A run
+   ends after 16384 instructions or a poke, as `INT_TIMER`.
+
+   `tests/unit/engine_test.c` runs hand-assembled x86-64 through the engine
+   with no loader: the syscall stop and its registers, flags, a store
+   through each patched path on its own copy-on-write page (each fails with
+   blink's write-intent commit taken out), the read after a CoW write,
+   faults that stop at their instruction and run again once fixed, a
+   faulting push leaving RSP alone, stack growth, `#UD`, `#DE`, the budget,
+   a poke, and `fs:`. blink's configuration (`emu/blink/config/config.h`)
+   carries the five host probes the interpreter reads: without
+   `HAVE_MAP_ANONYMOUS`, blink's bus allocation asks mmap for a flag the
+   host does not know.
+
+   Signal frames, ptrace and `set_thread_area` are i386 code under
+   `#if !GUEST_X86_64`. On x86-64 a handler being called stops ish with a
+   message naming milestone 6, ptrace answers ENOSYS until something needs
+   it, and the syscall table is still i386's until milestone 4.
 4. **exec and a first guest.** ELF64 in `kernel/exec.c` and `elf.h`
    (ELFCLASS64, EM_X86_64; ELF64 moves `p_flags` and reorders `Elf_Sym`):
    program headers, `PT_INTERP`, an 8-byte argv/envp stack, 16-byte auxv

@@ -1,5 +1,20 @@
 #include "kernel/calls.h"
 
+#if GUEST_X86_64
+
+// x86-64 has no descriptor table here: CLONE_SETTLS's argument is the new
+// thread's FS base itself, the value arch_prctl(ARCH_SET_FS) would set.
+int task_set_thread_area(struct task *task, addr_t tls) {
+    task->cpu.r.fs_base = tls;
+    return 0;
+}
+
+slong_t sys_set_thread_area(addr_t UNUSED(u_info)) {
+    return _ENOSYS;
+}
+
+#else
+
 struct user_desc {
     dword_t entry_number;
     dword_t base_addr;
@@ -35,6 +50,8 @@ slong_t sys_set_thread_area(addr_t u_info) {
     STRACE("set_thread_area(0x%x)", u_info);
     return task_set_thread_area(current, u_info);
 }
+
+#endif
 
 slong_t sys_set_tid_address(addr_t tid) {
     current->clear_tid = tid;

@@ -65,6 +65,8 @@ struct sigaction_ {
 #define TRAP_TRACE_ 2
 #define SEGV_MAPERR_ 1
 #define SEGV_ACCERR_ 2
+#define FPE_INTDIV_ 1
+#define FPE_FLTINV_ 7
 
 union sigval_ {
     int_t sv_int;

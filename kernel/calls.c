@@ -259,18 +259,18 @@ void dump_stack(int lines);
 void handle_interrupt(int interrupt) {
     struct cpu_state *cpu = &current->cpu;
     if (interrupt == INT_SYSCALL) {
-        unsigned syscall_num = cpu->eax;
+        ulong_t syscall_num = CPU_SYSCALL_NR(cpu);
         if (syscall_num >= NUM_SYSCALLS || syscall_table[syscall_num] == NULL) {
             printk("%d(%s) missing syscall %d\n", current->pid, current->comm, syscall_num);
-            cpu->eax = _ENOSYS;
+            CPU_SYSCALL_RESULT(cpu) = _ENOSYS;
         } else {
             if (syscall_table[syscall_num] == (syscall_t) syscall_stub) {
                 printk("%d(%s) stub syscall %d\n", current->pid, current->comm, syscall_num);
             }
             STRACE("%d call %-3d ", current->pid, syscall_num);
-            slong_t result = syscall_table[syscall_num](cpu->ebx, cpu->ecx, cpu->edx, cpu->esi, cpu->edi, cpu->ebp);
+            slong_t result = syscall_table[syscall_num](CPU_SYSCALL_ARGS(cpu));
             STRACE(" = 0x%x\n", result);
-            cpu->eax = result;
+            CPU_SYSCALL_RESULT(cpu) = result;
         }
     } else if (interrupt == INT_GPF) {
         // some page faults, such as stack growing or CoW clones, are handled by mem_ptr
@@ -278,7 +278,7 @@ void handle_interrupt(int interrupt) {
         void *ptr = mem_ptr(current->mem, cpu->segfault_addr, cpu->segfault_was_write ? MEM_WRITE : MEM_READ);
         read_wrunlock(&current->mem->lock);
         if (ptr == NULL) {
-            printk("%d page fault on 0x%x at 0x%x\n", current->pid, cpu->segfault_addr, cpu->eip);
+            printk("%d page fault on 0x%x at 0x%x\n", current->pid, cpu->segfault_addr, CPU_IP(cpu));
             struct siginfo_ info = {
                 .code = mem_segv_reason(current->mem, cpu->segfault_addr),
                 .fault.addr = cpu->segfault_addr,
@@ -287,10 +287,10 @@ void handle_interrupt(int interrupt) {
             deliver_signal(current, SIGSEGV_, info);
         }
     } else if (interrupt == INT_UNDEFINED) {
-        printk("%d illegal instruction at 0x%x: ", current->pid, cpu->eip);
+        printk("%d illegal instruction at 0x%x: ", current->pid, CPU_IP(cpu));
         for (int i = 0; i < 8; i++) {
             uint8_t b;
-            if (user_get(cpu->eip + i, b))
+            if (user_get(CPU_IP(cpu) + i, b))
                 break;
             printk("%02x ", b);
         }
@@ -298,9 +298,16 @@ void handle_interrupt(int interrupt) {
         dump_stack(8);
         struct siginfo_ info = {
             .code = SI_KERNEL_,
-            .fault.addr = cpu->eip,
+            .fault.addr = CPU_IP(cpu),
         };
         deliver_signal(current, SIGILL_, info);
+    } else if (interrupt == INT_DIV || interrupt == INT_FPU) {
+        // asbestos raises neither; blink raises both
+        struct siginfo_ info = {
+            .code = interrupt == INT_DIV ? FPE_INTDIV_ : FPE_FLTINV_,
+            .fault.addr = CPU_IP(cpu),
+        };
+        deliver_signal(current, SIGFPE_, info);
     } else if (interrupt == INT_BREAKPOINT) {
         lock(&pids_lock);
         send_signal(current, SIGTRAP_, (struct siginfo_) {
@@ -361,8 +368,8 @@ void dump_mem(addr_t start, uint_t len) {
 }
 
 void dump_stack(int lines) {
-    printk("stack at %x, base at %x, ip at %x\n", current->cpu.esp, current->cpu.ebp, current->cpu.eip);
-    dump_mem(current->cpu.esp, lines * sizeof(dword_t) * 8);
+    printk("stack at %x, base at %x, ip at %x\n", CPU_SP(&current->cpu), CPU_BP(&current->cpu), CPU_IP(&current->cpu));
+    dump_mem(CPU_SP(&current->cpu), lines * sizeof(dword_t) * 8);
 }
 
 // TODO find a home for this

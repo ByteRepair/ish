@@ -16,6 +16,46 @@ struct tlb;
 int cpu_run_to_interrupt(struct cpu_state *cpu, struct tlb *tlb);
 void cpu_poke(struct cpu_state *cpu);
 
+#if GUEST_X86_64
+#include "emu/x86_64.h"
+
+struct blink_cpu;
+
+// The x86-64 guest's CPU, as the kernel holds it between runs. The registers
+// are the engine's to load and store: it copies them into its interpreter at
+// the start of cpu_run_to_interrupt and back at the end.
+struct cpu_state {
+    struct mmu *mmu;
+    long cycle;
+
+    struct x86_64_regs r;
+
+    // for the page fault handler
+    addr_t segfault_addr;
+    bool segfault_was_write;
+
+    dword_t trapno;
+    // access atomically
+    bool *poked_ptr;
+    bool _poked;
+
+    // The engine's per-thread interpreter, made on the first run. A copied
+    // cpu_state (a fork or a clone) must not share it: task_create_ clears it.
+    struct blink_cpu *engine;
+};
+
+// What the kernel reads and writes of a guest's registers, by meaning rather
+// than by name. The syscall ABI is Linux's: number in rax, arguments in rdi,
+// rsi, rdx, r10, r8 and r9, result in rax.
+#define CPU_IP(cpu) ((cpu)->r.rip)
+#define CPU_SP(cpu) ((cpu)->r.rsp)
+#define CPU_BP(cpu) ((cpu)->r.rbp)
+#define CPU_SYSCALL_NR(cpu) ((cpu)->r.rax)
+#define CPU_SYSCALL_ARGS(cpu) (cpu)->r.rdi, (cpu)->r.rsi, (cpu)->r.rdx, (cpu)->r.r10, (cpu)->r.r8, (cpu)->r.r9
+#define CPU_SYSCALL_RESULT(cpu) ((cpu)->r.rax)
+
+#else
+
 union mm_reg {
     qword_t qw;
     dword_t dw[2];
@@ -231,5 +271,17 @@ static inline const char *reg32_name(enum reg32 reg) {
         default: return "?";
     }
 }
+
+// What the kernel reads and writes of a guest's registers, by meaning rather
+// than by name; i386's syscall ABI is int 0x80, number in eax, arguments in
+// ebx, ecx, edx, esi, edi and ebp, result in eax.
+#define CPU_IP(cpu) ((cpu)->eip)
+#define CPU_SP(cpu) ((cpu)->esp)
+#define CPU_BP(cpu) ((cpu)->ebp)
+#define CPU_SYSCALL_NR(cpu) ((cpu)->eax)
+#define CPU_SYSCALL_ARGS(cpu) (cpu)->ebx, (cpu)->ecx, (cpu)->edx, (cpu)->esi, (cpu)->edi, (cpu)->ebp
+#define CPU_SYSCALL_RESULT(cpu) ((cpu)->eax)
+
+#endif // GUEST_X86_64
 
 #endif

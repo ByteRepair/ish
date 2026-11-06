@@ -15,7 +15,7 @@ int xsave_extra = 0;
 int fxsave_extra = 0;
 static void sigmask_set(sigset_t_ set);
 static void altstack_to_user(struct sighand *sighand, struct stack_t_ *user_stack);
-static bool is_on_altstack(dword_t sp, struct sighand *sighand);
+static bool is_on_altstack(addr_t sp, struct sighand *sighand);
 
 static int signal_is_blockable(int sig) {
     return sig != SIGKILL_ && sig != SIGSTOP_;
@@ -147,6 +147,7 @@ int send_group_signal(dword_t pgid, int sig, struct siginfo_ info) {
     return 0;
 }
 
+#if !GUEST_X86_64
 static addr_t sigreturn_trampoline(const char *name) {
     addr_t sigreturn_addr = vdso_symbol(name);
     if (sigreturn_addr == 0) {
@@ -215,6 +216,8 @@ static void setup_rt_sigframe(struct siginfo_ *info, struct rt_sigframe_ *frame)
     memcpy(frame->retcode, &rt_retcode, sizeof(rt_retcode));
 }
 
+#endif
+
 static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
     int sig = info->sig;
     STRACE("%d receiving signal %d\n", current->pid, sig);
@@ -236,6 +239,10 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
     }
 
     struct sigaction_ *action = &sighand->action[info->sig];
+#if GUEST_X86_64
+    (void) action;
+    die("%d: signal %d has a handler, and x86-64 signal frames are milestone 6", current->pid, info->sig);
+#else
     bool need_siginfo = action->flags & SA_SIGINFO_;
 
     // setup the frame
@@ -295,6 +302,7 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
 
     if (action->flags & SA_RESETHAND_)
         *action = (struct sigaction_) {.handler = SIG_DFL_};
+#endif
 }
 
 void signal_delivery_stop(int sig, struct siginfo_ *info) {
@@ -380,6 +388,18 @@ void receive_signals(void) {
     }
 }
 
+#if GUEST_X86_64
+
+slong_t sys_rt_sigreturn(void) {
+    die("%d: rt_sigreturn, and x86-64 signal frames are milestone 6", current->pid);
+}
+
+slong_t sys_sigreturn(void) {
+    return _ENOSYS;
+}
+
+#else
+
 static void restore_sigcontext(struct sigcontext_ *context, struct cpu_state *cpu) {
     cpu->eax = context->ax;
     cpu->ebx = context->bx;
@@ -435,6 +455,8 @@ slong_t sys_sigreturn(void) {
     unlock(&current->sighand->lock);
     return cpu->eax;
 }
+
+#endif
 
 struct sighand *sighand_new(void) {
     struct sighand *sighand = malloc(sizeof(struct sighand));
@@ -568,7 +590,7 @@ slong_t sys_rt_sigpending(addr_t set_addr) {
     return 0;
 }
 
-static bool is_on_altstack(dword_t sp, struct sighand *sighand) {
+static bool is_on_altstack(addr_t sp, struct sighand *sighand) {
     return sp > sighand->altstack && sp <= sighand->altstack + sighand->altstack_size;
 }
 
@@ -578,7 +600,7 @@ static void altstack_to_user(struct sighand *sighand, struct stack_t_ *user_stac
     user_stack->flags = 0;
     if (sighand->altstack == 0)
         user_stack->flags |= SS_DISABLE_;
-    if (is_on_altstack(current->cpu.esp, sighand))
+    if (is_on_altstack(CPU_SP(&current->cpu), sighand))
         user_stack->flags |= SS_ONSTACK_;
 }
 
@@ -595,7 +617,7 @@ slong_t sys_sigaltstack(addr_t ss_addr, addr_t old_ss_addr) {
         }
     }
     if (ss_addr != 0) {
-        if (is_on_altstack(current->cpu.esp, sighand)) {
+        if (is_on_altstack(CPU_SP(&current->cpu), sighand)) {
             unlock(&sighand->lock);
             return _EPERM;
         }

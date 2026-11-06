@@ -390,6 +390,18 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     current->mm->auxv_end = p;
 
     current->mm->stack_start = sp;
+#if GUEST_X86_64
+    // what Linux starts an x86-64 process with: every register zero but the
+    // stack and instruction pointers, flags with only the reserved bit,
+    // SSE's default control word and x87's
+    current->cpu.r = (struct x86_64_regs) {
+        .rsp = sp,
+        .rip = entry,
+        .rflags = 0x2,
+        .mxcsr = 0x1f80,
+        .x87 = {.cw = 0x37f},
+    };
+#else
     current->cpu.esp = sp;
     current->cpu.eip = entry;
     current->cpu.fcw = 0x37f;
@@ -407,6 +419,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     current->cpu.ebp = 0;
     collapse_flags(&current->cpu);
     current->cpu.eflags = 0;
+#endif
 
     err = 0;
 out_free_interp:
