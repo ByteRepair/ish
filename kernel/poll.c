@@ -140,6 +140,9 @@ static int poll_event_callback(void *context, int types, union poll_fd_info info
 }
 dword_t sys_poll(addr_t fds, dword_t nfds, int_t timeout) {
     STRACE("poll(0x%x, %d, %d)", fds, nfds, timeout);
+    // polls is sized by nfds on the host stack: bound it first, as Linux does
+    if (nfds > rlimit(RLIMIT_NOFILE_))
+        return _EINVAL;
     struct pollfd_ polls[nfds];
     if (fds != 0 || nfds != 0)
         if (user_read(fds, polls, sizeof(struct pollfd_) * nfds))
