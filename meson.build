@@ -22,6 +22,14 @@ endforeach
 add_project_arguments('-DLOG_HANDLER_' + get_option('log_handler').to_upper() + '=1', language: 'c')
 add_project_arguments('-DENGINE_' + get_option('engine').to_upper() + '=1', language: 'c')
 
+guest = get_option('guest')
+if guest == 'x86_64' and get_option('engine') != 'blink'
+    error('An x86_64 guest runs on the blink engine: pass -Dengine=blink')
+elif guest == 'i386' and get_option('engine') == 'blink'
+    error('The blink engine runs an x86_64 guest: pass -Dguest=x86_64')
+endif
+add_project_arguments('-DGUEST_X86_64=' + (guest == 'x86_64' ? '1' : '0'), language: 'c')
+
 if get_option('no_crlf')
     add_project_arguments('-DNO_CRLF', language: 'c')
 endif
@@ -66,7 +74,13 @@ emu_src += [
     offsets,
 ]
 
-libish_emu = library('ish_emu', emu_src, include_directories: includes)
+if get_option('engine') == 'asbestos'
+    libish_emu = library('ish_emu', emu_src, include_directories: includes)
+else
+    # The blink engine is milestone 3; until then an x86_64 build is the
+    # kernel library alone, with nothing to run it.
+    libish_emu = []
+endif
 
 libfakefs = library('fakefs',
     ['fs/fake-db.c', 'fs/fake-migrate.c', 'fs/fake-rebuild.c'],
@@ -76,8 +90,8 @@ libfakefs = library('fakefs',
 subdir('deps')
 
 if get_option('kernel') == 'ish'
-    if get_option('engine') != 'asbestos'
-        error('Only asbestos is supported with ish kernel')
+    if get_option('engine') == 'unicorn'
+        error('The unicorn engine runs only under the linux kernel')
     endif
 
     src = [
@@ -161,7 +175,7 @@ if get_option('kernel') == 'ish'
         dependencies: dependencies,
         include_directories: includes)
 
-    if not meson.is_cross_build()
+    if not meson.is_cross_build() and get_option('engine') == 'asbestos'
         executable('ish', ['main.c'], dependencies: ish)
     endif
 
