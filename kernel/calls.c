@@ -28,8 +28,8 @@ slong_t syscall_success_stub(void) {
 // write spelled in guest longs or given each guest's own layout, so the
 // same handler is right for either; what is x86-64's alone (six-argument
 // mmap, whole 64-bit offsets, arch_prctl, getrlimit's 64-bit struct) is
-// under GUEST_X86_64 beside the handler it shares the work with. clone is
-// milestone 6's, with the signal frames.
+// under GUEST_X86_64 beside the handler it shares the work with. clone goes
+// through sys_clone64, which swaps the child-tid and TLS arguments.
 syscall_t syscall_table[] = {
     [0]   = (syscall_t) sys_read,
     [1]   = (syscall_t) sys_write,
@@ -82,6 +82,7 @@ syscall_t syscall_table[] = {
     [53]  = (syscall_t) sys_socketpair,
     [54]  = (syscall_t) sys_setsockopt,
     [55]  = (syscall_t) sys_getsockopt,
+    [56]  = (syscall_t) sys_clone64,
     [57]  = (syscall_t) sys_fork,
     [58]  = (syscall_t) sys_vfork,
     [59]  = (syscall_t) sys_execve,

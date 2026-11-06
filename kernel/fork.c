@@ -196,6 +196,16 @@ slong_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t c
     return pid;
 }
 
+#if GUEST_X86_64
+// x86-64's clone passes (flags, stack, ptid, ctid, tls): the child-tid and
+// TLS pointers are swapped relative to i386's order, which sys_clone shares
+// with i386 (flags, stack, ptid, tls, ctid). Reorder here rather than in the
+// shared handler so i386's clone is untouched.
+slong_t sys_clone64(dword_t flags, addr_t stack, addr_t ptid, addr_t ctid, addr_t tls) {
+    return sys_clone(flags, stack, ptid, tls, ctid);
+}
+#endif
+
 slong_t sys_fork(void) {
     return sys_clone(SIGCHLD_, 0, 0, 0, 0);
 }
