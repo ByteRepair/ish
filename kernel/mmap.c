@@ -56,10 +56,13 @@ static addr_t do_mmap(addr_t addr, dword_t len, dword_t prot, dword_t flags, fd_
         if (PGOFFSET(addr) != 0)
             return _EINVAL;
         page = PAGE(addr);
+        // A hint that is not free is only a hint: look elsewhere rather
+        // than map over what is there.
         if (!(flags & MMAP_FIXED) && !pt_is_hole(current->mem, page, pages)) {
             addr = 0;
         }
-    } else {
+    }
+    if (addr == 0) {
         page = pt_find_hole(current->mem, pages);
         if (page == BAD_PAGE)
             return _ENOMEM;
