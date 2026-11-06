@@ -24,10 +24,34 @@ slong_t sys_prctl(dword_t option, ulong_t arg2, ulong_t UNUSED(arg3), ulong_t UN
     }
 }
 
+#if GUEST_X86_64
+
+#define ARCH_SET_GS_ 0x1001
+#define ARCH_SET_FS_ 0x1002
+#define ARCH_GET_FS_ 0x1003
+#define ARCH_GET_GS_ 0x1004
+
+// The FS and GS bases: FS is where the C library keeps its thread pointer.
+slong_t sys_arch_prctl(int_t code, addr_t addr) {
+    STRACE("arch_prctl(%#x, %#x)", code, addr);
+    struct x86_64_regs *r = &current->cpu.r;
+    switch (code) {
+        case ARCH_SET_FS_: r->fs_base = addr; return 0;
+        case ARCH_SET_GS_: r->gs_base = addr; return 0;
+        case ARCH_GET_FS_: return user_put(addr, r->fs_base) ? _EFAULT : 0;
+        case ARCH_GET_GS_: return user_put(addr, r->gs_base) ? _EFAULT : 0;
+        default: return _EINVAL;
+    }
+}
+
+#else
+
 slong_t sys_arch_prctl(int_t code, addr_t addr) {
     STRACE("arch_prctl(%#x, %#x)", code, addr);
     return _EINVAL;
 }
+
+#endif
 
 #define REBOOT_MAGIC1 0xfee1dead
 #define REBOOT_MAGIC2 672274793

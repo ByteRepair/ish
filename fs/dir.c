@@ -20,8 +20,8 @@ static void fd_seekdir(struct fd *fd, unsigned long off) {
 }
 
 struct linux_dirent_ {
-    dword_t inode;
-    dword_t offset;
+    ulong_t inode;
+    ulong_t offset;
     word_t reclen;
     char name[];
 } __attribute__((packed));

@@ -12,13 +12,15 @@ slong_t sys_clock_gettime(dword_t clock, addr_t tp);
 slong_t sys_clock_settime(dword_t clock, addr_t tp);
 slong_t sys_clock_getres(dword_t clock, addr_t res_addr);
 
+// Longs in Linux, so guest longs here: the same layout as before on i386,
+// and x86-64's own there.
 struct timeval_ {
-    dword_t sec;
-    dword_t usec;
+    time_t_ sec;
+    ulong_t usec;
 };
 struct timespec_ {
-    dword_t sec;
-    dword_t nsec;
+    time_t_ sec;
+    ulong_t nsec;
 };
 struct timezone_ {
     dword_t minuteswest;

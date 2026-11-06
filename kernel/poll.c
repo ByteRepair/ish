@@ -230,7 +230,7 @@ slong_t sys_pselect(fd_t nfds, addr_t readfds_addr, addr_t writefds_addr, addr_t
     // a system call can only take 6 parameters, so the last two need to be passed as a pointer to a struct
     struct {
         addr_t mask_addr;
-        dword_t mask_size;
+        ulong_t mask_size;
     } sigmask;
     if (user_get(sigmask_addr, sigmask))
         return _EFAULT;

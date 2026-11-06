@@ -906,25 +906,21 @@ slong_t sys_lchown(addr_t path_addr, uid_t_ owner, uid_t_ group) {
     return sys_fchownat(AT_FDCWD_, path_addr, owner, group, AT_SYMLINK_NOFOLLOW_);
 }
 
-slong_t sys_truncate64(addr_t path_addr, dword_t size_low, dword_t size_high) {
-    off_t_ size = ((qword_t) size_high << 32) | size_low;
+static slong_t do_truncate(addr_t path_addr, off_t_ size) {
     char path[MAX_PATH];
     if (user_read_string(path_addr, path, sizeof(path)))
         return _EFAULT;
     return generic_setattrat(NULL, path, make_attr(size, size), true);
 }
 
-slong_t sys_ftruncate64(fd_t f, dword_t size_low, dword_t size_high) {
-    off_t_ size = ((qword_t) size_high << 32) | size_low;
+static slong_t do_ftruncate(fd_t f, off_t_ size) {
     struct fd *fd = f_get(f);
     if (fd == NULL)
         return _EBADF;
     return generic_fsetattr(fd, make_attr(size, size));
 }
 
-slong_t sys_fallocate(fd_t f, dword_t UNUSED(mode), dword_t offset_low, dword_t offset_high, dword_t len_low, dword_t len_high) {
-    off_t_ offset = ((qword_t) offset_high << 32) | offset_low;
-    off_t_ len = ((qword_t) len_high << 32) | len_low;
+static slong_t do_fallocate(fd_t f, off_t_ offset, off_t_ len) {
     struct fd *fd = f_get(f);
     if (fd == NULL)
         return _EBADF;
@@ -936,6 +932,39 @@ slong_t sys_fallocate(fd_t f, dword_t UNUSED(mode), dword_t offset_low, dword_t 
         return generic_fsetattr(fd, make_attr(size, offset + len));
     return 0;
 }
+
+#if GUEST_X86_64
+
+// x86-64 passes a length or an offset whole
+slong_t sys_truncate(addr_t path_addr, slong_t size) {
+    return do_truncate(path_addr, size);
+}
+
+slong_t sys_ftruncate(fd_t f, slong_t size) {
+    return do_ftruncate(f, size);
+}
+
+slong_t sys_fallocate(fd_t f, dword_t UNUSED(mode), slong_t offset, slong_t len) {
+    return do_fallocate(f, offset, len);
+}
+
+#else
+
+// i386 passes them as two halves, low first
+slong_t sys_truncate64(addr_t path_addr, dword_t size_low, dword_t size_high) {
+    return do_truncate(path_addr, ((qword_t) size_high << 32) | size_low);
+}
+
+slong_t sys_ftruncate64(fd_t f, dword_t size_low, dword_t size_high) {
+    return do_ftruncate(f, ((qword_t) size_high << 32) | size_low);
+}
+
+slong_t sys_fallocate(fd_t f, dword_t UNUSED(mode), dword_t offset_low, dword_t offset_high, dword_t len_low, dword_t len_high) {
+    return do_fallocate(f, ((qword_t) offset_high << 32) | offset_low,
+            ((qword_t) len_high << 32) | len_low);
+}
+
+#endif
 
 slong_t sys_mkdirat(fd_t at_f, addr_t path_addr, mode_t_ mode) {
     char path[MAX_PATH];

@@ -47,21 +47,21 @@ struct msghdr_ {
     addr_t msg_name;
     uint_t msg_namelen;
     addr_t msg_iov;
-    uint_t msg_iovlen;
+    ulong_t msg_iovlen;
     addr_t msg_control;
-    uint_t msg_controllen;
+    ulong_t msg_controllen;
     int_t msg_flags;
 };
 
 struct cmsghdr_ {
-    dword_t len;
+    ulong_t len;
     int_t level;
     int_t type;
     uint8_t data[];
 };
 #define SCM_RIGHTS_ 1
 // copied and ported from musl
-#define CMSG_LEN_(cmsg) (((cmsg)->len + sizeof(dword_t) - 1) & ~(dword_t)(sizeof(dword_t) - 1))
+#define CMSG_LEN_(cmsg) (((cmsg)->len + sizeof(ulong_t) - 1) & ~(ulong_t)(sizeof(ulong_t) - 1))
 #define CMSG_NEXT_(cmsg) ((uint8_t *)(cmsg) + CMSG_LEN_(cmsg))
 #define CMSG_NXTHDR_(cmsg, mhdr_end) ((cmsg)->len < sizeof (struct cmsghdr_) || \
         CMSG_LEN_(cmsg) + sizeof(struct cmsghdr_) >= (size_t) (mhdr_end - (uint8_t *)(cmsg)) \
@@ -183,8 +183,13 @@ static inline int sock_flags_from_real(int real) {
 #define SO_TIMESTAMP_ 29
 #define SO_PROTOCOL_ 38
 #define SO_DOMAIN_ 39
+#if GUEST_X86_64
+#define SO_RCVTIMEO_ 20
+#define SO_SNDTIMEO_ 21
+#else
 #define SO_RCVTIMEO_ 66
 #define SO_SNDTIMEO_ 67
+#endif
 #define IP_TOS_ 1
 #define IP_TTL_ 2
 #define IP_HDRINCL_ 3

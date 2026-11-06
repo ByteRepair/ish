@@ -183,7 +183,7 @@ slong_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2,
 
 struct robust_list_head_ {
     addr_t list;
-    dword_t offset;
+    slong_t offset;
     addr_t list_op_pending;
 };
 
@@ -206,7 +206,7 @@ slong_t sys_get_robust_list(pid_t_ pid, addr_t robust_list_ptr, addr_t len_ptr) 
 
     if (user_put(robust_list_ptr, current->robust_list))
         return _EFAULT;
-    if (user_put(len_ptr, (int[]) {sizeof(struct robust_list_head_)}))
+    if (user_put(len_ptr, (ulong_t[]) {sizeof(struct robust_list_head_)}))
         return _EFAULT;
     return 0;
 }

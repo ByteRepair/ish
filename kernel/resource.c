@@ -113,6 +113,32 @@ slong_t sys_setrlimit32(dword_t resource, addr_t rlim_addr) {
     return rlimit_set(current, resource, rlimit);
 }
 
+#if GUEST_X86_64
+
+// x86-64's getrlimit and setrlimit take the 64-bit struct, which i386 only
+// reaches through prlimit64
+slong_t sys_getrlimit(dword_t resource, addr_t rlim_addr) {
+    struct rlimit_ rlimit;
+    int err = rlimit_get(current, resource, &rlimit);
+    if (err < 0)
+        return err;
+    if (user_put(rlim_addr, rlimit))
+        return _EFAULT;
+    return 0;
+}
+
+slong_t sys_setrlimit(dword_t resource, addr_t rlim_addr) {
+    struct rlimit_ rlimit;
+    if (user_get(rlim_addr, rlimit))
+        return _EFAULT;
+    int err = check_setrlimit(resource, rlimit);
+    if (err < 0)
+        return err;
+    return rlimit_set(current, resource, rlimit);
+}
+
+#endif
+
 slong_t sys_prlimit64(pid_t_ pid, dword_t resource, addr_t new_limit_addr, addr_t old_limit_addr) {
     STRACE("prlimit64(%d, %d)", pid, resource);
     if (pid != 0)
@@ -208,7 +234,8 @@ slong_t sys_sched_getaffinity(pid_t_ pid, dword_t cpusetsize, addr_t cpuset_addr
     }
 
     unsigned cpus = sysconf(_SC_NPROCESSORS_ONLN);
-    char cpuset[cpus / 8 + 1];
+    // whole guest longs, as Linux answers: x86-64's C libraries check
+    char cpuset[(cpus / 8 + sizeof(ulong_t)) / sizeof(ulong_t) * sizeof(ulong_t)];
     if (cpusetsize < sizeof(cpuset))
         return _EINVAL;
     memset(cpuset, 0, sizeof(cpuset));

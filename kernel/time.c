@@ -44,7 +44,7 @@ static struct itimerspec_ timer_spec_from_real(struct timer_spec spec) {
 };
 
 slong_t sys_time(addr_t time_out) {
-    dword_t now = time(NULL);
+    time_t_ now = time(NULL);
     if (time_out != 0)
         if (user_put(time_out, now))
             return _EFAULT;

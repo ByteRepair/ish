@@ -294,6 +294,16 @@ slong_t sys_fcntl(fd_t f, dword_t cmd, ulong_t arg) {
     struct flock_ flock;
     fd_t new_f;
     int err;
+#if GUEST_X86_64
+    // x86-64's lock commands take the 64-bit flock, which are i386's *LK64
+    // ones; 12 to 14 are not commands there at all
+    switch (cmd) {
+        case F_GETLK_: cmd = F_GETLK64_; break;
+        case F_SETLK_: cmd = F_SETLK64_; break;
+        case F_SETLKW_: cmd = F_SETLKW64_; break;
+        case F_GETLK64_: case F_SETLK64_: case F_SETLKW64_: return _EINVAL;
+    }
+#endif
     switch (cmd) {
         case F_DUPFD_:
             STRACE("fcntl(%d, F_DUPFD, %d)", f, arg);

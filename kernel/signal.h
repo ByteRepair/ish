@@ -18,7 +18,7 @@ typedef qword_t sigset_t_;
 
 struct sigaction_ {
     addr_t handler;
-    dword_t flags;
+    ulong_t flags;
     addr_t restorer;
     sigset_t_ mask;
 } __attribute__((packed));
@@ -179,7 +179,7 @@ static inline void sigset_del(sigset_t_ *set, int sig) {
 struct stack_t_ {
     addr_t stack;
     dword_t flags;
-    dword_t size;
+    ulong_t size;
 };
 #define SS_ONSTACK_ 1
 #define SS_DISABLE_ 2

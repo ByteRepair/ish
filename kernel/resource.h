@@ -37,6 +37,10 @@ struct rlimit32_ {
 slong_t sys_getrlimit32(dword_t resource, addr_t rlim_addr);
 slong_t sys_setrlimit32(dword_t resource, addr_t rlim_addr);
 slong_t sys_prlimit64(pid_t_ pid, dword_t resource, addr_t new_limit_addr, addr_t old_limit_addr);
+#if GUEST_X86_64
+slong_t sys_getrlimit(dword_t resource, addr_t rlim_addr);
+slong_t sys_setrlimit(dword_t resource, addr_t rlim_addr);
+#endif
 slong_t sys_old_getrlimit32(dword_t resource, addr_t rlim_addr);
 
 rlim_t_ rlimit(int resource);
@@ -44,20 +48,20 @@ rlim_t_ rlimit(int resource);
 struct rusage_ {
     struct timeval_ utime;
     struct timeval_ stime;
-    dword_t maxrss;
-    dword_t ixrss;
-    dword_t idrss;
-    dword_t isrss;
-    dword_t minflt;
-    dword_t majflt;
-    dword_t nswap;
-    dword_t inblock;
-    dword_t oublock;
-    dword_t msgsnd;
-    dword_t msgrcv;
-    dword_t nsignals;
-    dword_t nvcsw;
-    dword_t nivcsw;
+    ulong_t maxrss;
+    ulong_t ixrss;
+    ulong_t idrss;
+    ulong_t isrss;
+    ulong_t minflt;
+    ulong_t majflt;
+    ulong_t nswap;
+    ulong_t inblock;
+    ulong_t oublock;
+    ulong_t msgsnd;
+    ulong_t msgrcv;
+    ulong_t nsignals;
+    ulong_t nvcsw;
+    ulong_t nivcsw;
 };
 
 struct rusage_ rusage_get_current(void);

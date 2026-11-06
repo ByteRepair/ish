@@ -70,7 +70,7 @@ slong_t sys_msync(addr_t addr, ulong_t len, int_t flags);
 #define LOCK_UN_ 8
 struct iovec_ {
     addr_t base;
-    uint_t len;
+    ulong_t len;
 };
 slong_t sys_read(fd_t fd_no, addr_t buf_addr, ulong_t size);
 slong_t sys_readv(fd_t fd_no, addr_t iovec_addr, dword_t iovec_count);
@@ -147,9 +147,15 @@ slong_t sys_fchown32(fd_t f, dword_t owner, dword_t group);
 slong_t sys_fchownat(fd_t at_f, addr_t path_addr, dword_t owner, dword_t group, int flags);
 slong_t sys_chown32(addr_t path_addr, uid_t_ owner, uid_t_ group);
 slong_t sys_lchown(addr_t path_addr, uid_t_ owner, uid_t_ group);
+#if GUEST_X86_64
+slong_t sys_truncate(addr_t path_addr, slong_t size);
+slong_t sys_ftruncate(fd_t f, slong_t size);
+slong_t sys_fallocate(fd_t f, dword_t mode, slong_t offset, slong_t len);
+#else
 slong_t sys_truncate64(addr_t path_addr, dword_t size_low, dword_t size_high);
 slong_t sys_ftruncate64(fd_t f, dword_t size_low, dword_t size_high);
 slong_t sys_fallocate(fd_t f, dword_t mode, dword_t offset_low, dword_t offset_high, dword_t len_low, dword_t len_high);
+#endif
 slong_t sys_mkdir(addr_t path_addr, mode_t_ mode);
 slong_t sys_mkdirat(fd_t at_f, addr_t path_addr, mode_t_ mode);
 slong_t sys_utimensat(fd_t at_f, addr_t path_addr, addr_t times_addr, dword_t flags);
@@ -238,17 +244,17 @@ slong_t sys_uname(addr_t uts_addr);
 slong_t sys_sethostname(addr_t hostname_addr, dword_t hostname_len);
 
 struct sys_info {
-    dword_t uptime;
-    dword_t loads[3];
-    dword_t totalram;
-    dword_t freeram;
-    dword_t sharedram;
-    dword_t bufferram;
-    dword_t totalswap;
-    dword_t freeswap;
+    ulong_t uptime;
+    ulong_t loads[3];
+    ulong_t totalram;
+    ulong_t freeram;
+    ulong_t sharedram;
+    ulong_t bufferram;
+    ulong_t totalswap;
+    ulong_t freeswap;
     word_t procs;
-    dword_t totalhigh;
-    dword_t freehigh;
+    ulong_t totalhigh;
+    ulong_t freehigh;
     dword_t mem_unit;
     char pad;
 };

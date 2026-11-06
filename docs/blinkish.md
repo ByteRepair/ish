@@ -244,7 +244,7 @@ runnable on the macOS harness (below) before the next begins.
    program depends on. On x86-64, five of seven pass; `pread_high` and
    `fcntl_setlkw` want `ftruncate`, `fcntl` and `wait4`, milestone 5's. The
    i386 build's code is unchanged.
-5. **Enough ABI for musl.** `arch_prctl` (FS base for TLS; today a stub
+5. **Enough ABI for musl** — done. `arch_prctl` (FS base for TLS; today a stub
    at `kernel/misc.c:27`), and the x86-64 layouts of what differs: `stat`
    (144 bytes, its own field order — `newfstatat`, no stat64), `statfs`
    (all longs, no statfs64), `linux_dirent`, `flock` (unpacked, 32 bytes),
@@ -259,6 +259,35 @@ runnable on the macOS harness (below) before the next begins.
    old_mmap, the `*32` uid calls, `fcntl64`, `_llseek`, `waitpid`,
    rlimit32, `set_thread_area`, sigreturn. `uname -m` x86_64. **Done when** the
    Alpine x86_64 busybox runs through `ld-musl-x86_64.so.1`.
+
+   As built: most of those structs differ only because their fields are C
+   longs, so they are spelled in guest longs and are right for both
+   guests at once — timespec, timeval and what is made of them, rusage,
+   sysinfo, iovec, msghdr and cmsghdr (control messages aligned to a
+   long), sigaction's flags, stack_t, linux_dirent, statfs,
+   robust_list_head, pselect6's sigmask pair. `stat` has x86-64's own
+   struct and converter (`guest_stat_t`), and `flock` is packed on i386
+   only, x86-64's `fcntl` mapping its lock commands onto i386's `*LK64`.
+   x86-64 alone has six-argument `mmap`, whole-offset `truncate`,
+   `ftruncate` and `fallocate`, `getrlimit` and `setrlimit` over the 64-bit
+   struct, `arch_prctl` setting and reading the FS and GS bases, and
+   `SO_RCVTIMEO`/`SO_SNDTIMEO` as 20 and 21. The x86-64 table maps every
+   call i386 has a handler for, at x86-64's numbers, but `clone`.
+
+   Busybox through ld-musl runs `ls`, `stat`, `cat`, `wc`, `date`,
+   `md5sum`, `df`, `sort` and builtin-only `sh -c`. `tests/regress/`
+   passes on both guests, nine tests now: `abi_structs` reads back
+   `stat`, `fstat`, `fstatat` with `AT_EMPTY_PATH`, `timespec`, `iovec`,
+   `rusage` and `statfs` against Linux's own definitions for each
+   architecture, and fails on x86-64 if `stat` is written i386's way.
+
+   Along the way, and in the i386 build too: `setrlimit` read a 64-bit
+   struct where i386 passes two 32-bit words (its own commit, with
+   `rlimit`); `stat` zeroes the struct first, so `stat64`'s padding no
+   longer carries host stack bytes; `fstatat` honours `AT_EMPTY_PATH`; and
+   `sched_getaffinity` answers in whole longs, as Linux does. Those three
+   are the only i386 code this milestone changes. `free` shows zeros on
+   both guests: the macOS platform layer never fills in memory figures.
 6. **clone, fork and signals.** Copy the `Machine` on fork and clone —
    x86-64's clone takes `(flags, stack, ptid, ctid, tls)`, not i386's
    order, and `CLONE_SETTLS` sets the FS base rather than a `user_desc`.
