@@ -414,8 +414,8 @@ dword_t sys_lseek(fd_t f, dword_t off, dword_t whence) {
     return res;
 }
 
-dword_t sys_pread(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
-    STRACE("pread(%d, 0x%x, %d, %d)", f, buf_addr, size, off);
+static dword_t do_pread(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
+    STRACE("pread(%d, 0x%x, %d, %lld)", f, buf_addr, size, (long long) off);
     struct fd *fd = f_get(f);
     if (fd == NULL)
         return _EBADF;
@@ -451,8 +451,8 @@ out:
     return res;
 }
 
-dword_t sys_pwrite(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
-    STRACE("pwrite(%d, 0x%x, %d, %d)", f, buf_addr, size, off);
+static dword_t do_pwrite(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
+    STRACE("pwrite(%d, 0x%x, %d, %lld)", f, buf_addr, size, (long long) off);
     struct fd *fd = f_get(f);
     if (fd == NULL)
         return _EBADF;
@@ -480,6 +480,15 @@ dword_t sys_pwrite(fd_t f, addr_t buf_addr, dword_t size, off_t_ off) {
     unlock(&fd->lock);
     free(buf);
     return res;
+}
+
+// pread64 and pwrite64 take the offset as two 32-bit halves, low first.
+dword_t sys_pread(fd_t f, addr_t buf_addr, dword_t size, dword_t off_low, dword_t off_high) {
+    return do_pread(f, buf_addr, size, (off_t_) ((uint64_t) off_high << 32 | off_low));
+}
+
+dword_t sys_pwrite(fd_t f, addr_t buf_addr, dword_t size, dword_t off_low, dword_t off_high) {
+    return do_pwrite(f, buf_addr, size, (off_t_) ((uint64_t) off_high << 32 | off_low));
 }
 
 static int fd_ioctl(struct fd *fd, dword_t cmd, dword_t arg) {
