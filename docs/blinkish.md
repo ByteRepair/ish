@@ -304,10 +304,14 @@ runnable on the macOS harness (below) before the next begins.
    (`signal.c:173`, "TODO"), which mostly went unnoticed there, but on
    x86-64 every float is in an xmm register. **Done when** `busybox sh -c`
    runs pipelines and `trap` works.
-7. **A whole Alpine.** No vdso at first (musl falls back to syscalls when
-   `AT_SYSINFO_EHDR` is absent), an x86-64 vdso later if time calls show up in
-   profiles. **Done when** `apk add git python3` succeeds and both run, on
-   the macOS harness against realfs and fakefs alike.
+7. **A whole Alpine** — done. No vdso at first (musl falls back to syscalls
+   when `AT_SYSINFO_EHDR` is absent), an x86-64 vdso later if time calls show
+   up in profiles. `apk add git python3` installs all 27 packages and both
+   run: `python3 -c 'print(6*7)'` answers 42, and git inits, adds and commits
+   (its "dubious ownership" refusal is git reacting to the host-owned realfs
+   tree, not an emulator gap — the harness mounts the rootfs as the host
+   user). No syscalls had to be added: the x86-64 table already covered what
+   apk and python3 exercise, and clone (milestone 6) was the only gate.
 8. **Into Entoli.** `build.sh` builds both cores into one xcframework; the
    bridge gains its `blinkish_` twin; Entoli adds an x86_64 rootfs entry for
    iOS, a shell over the second bridge, and the Terminal setting with
