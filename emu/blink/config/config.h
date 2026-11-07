@@ -22,7 +22,10 @@
 #define HAVE_MAP_ANONYMOUS
 #define HAVE_SCHED_H
 #define HAVE_SCHED_YIELD
-#define HAVE_SYS_GETENTROPY  // rdrand and rdseed's entropy
+// iOS's SDK has no <sys/random.h> for getentropy (macOS's does), so the
+// getentropy path is off there; blink falls back to /dev/urandom, which the
+// interpreter's host side reads. The guest's own /dev/urandom is a device
+// node iSH serves, not what this reads.
 #define HAVE_DEV_URANDOM
 
 #endif
