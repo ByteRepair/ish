@@ -18,7 +18,7 @@ typedef qword_t sigset_t_;
 
 struct sigaction_ {
     addr_t handler;
-    dword_t flags;
+    ulong_t flags;
     addr_t restorer;
     sigset_t_ mask;
 } __attribute__((packed));
@@ -65,6 +65,8 @@ struct sigaction_ {
 #define TRAP_TRACE_ 2
 #define SEGV_MAPERR_ 1
 #define SEGV_ACCERR_ 2
+#define FPE_INTDIV_ 1
+#define FPE_FLTINV_ 7
 
 union sigval_ {
     int_t sv_int;
@@ -103,6 +105,12 @@ struct siginfo_ {
     };
 };
 
+// SIGCHLD's codes: how the child ended, its si_status the exit code or the
+// signal.
+#define CLD_EXITED_ 1
+#define CLD_KILLED_ 2
+#define CLD_DUMPED_ 3
+
 // a reasonable default siginfo
 static const struct siginfo_ SIGINFO_NIL = {
     .code = SI_KERNEL_,
@@ -125,6 +133,12 @@ struct sigevent_ {
 void send_signal(struct task *task, int sig, struct siginfo_ info);
 // send a signal without regard for whether the signal is blocked or ignored
 void deliver_signal(struct task *task, int sig, struct siginfo_ info);
+// Wakes every signalfd's readers and pollers to look again, after a signal
+// was queued. Takes no lock its caller may hold but signalfds' own.
+void signalfd_notify(void);
+// The first signal in mask queued for current, taken off its queue and no
+// longer pending; false where there is none. Needs current->sighand->lock.
+bool dequeue_signal(sigset_t_ mask, struct siginfo_ *info);
 // send a signal to current if it's not blocked or ignored, return whether that worked
 // exists specifically for sending SIGTTIN/SIGTTOU
 bool try_self_signal(int sig);
@@ -147,17 +161,17 @@ struct sighand *sighand_new(void);
 struct sighand *sighand_copy(struct sighand *sighand);
 void sighand_release(struct sighand *sighand);
 
-dword_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr, dword_t sigset_size);
-dword_t sys_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr);
-dword_t sys_rt_sigreturn(void);
-dword_t sys_sigreturn(void);
+slong_t sys_rt_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr, ulong_t sigset_size);
+slong_t sys_sigaction(dword_t signum, addr_t action_addr, addr_t oldaction_addr);
+slong_t sys_rt_sigreturn(void);
+slong_t sys_sigreturn(void);
 
 #define SIG_BLOCK_ 0
 #define SIG_UNBLOCK_ 1
 #define SIG_SETMASK_ 2
 typedef uint64_t sigset_t_;
-dword_t sys_rt_sigprocmask(dword_t how, addr_t set, addr_t oldset, dword_t size);
-int_t sys_rt_sigpending(addr_t set_addr);
+slong_t sys_rt_sigprocmask(dword_t how, addr_t set, addr_t oldset, ulong_t size);
+slong_t sys_rt_sigpending(addr_t set_addr);
 
 static inline sigset_t_ sig_mask(int sig) {
     assert(sig >= 1 && sig < NUM_SIGS);
@@ -177,20 +191,20 @@ static inline void sigset_del(sigset_t_ *set, int sig) {
 struct stack_t_ {
     addr_t stack;
     dword_t flags;
-    dword_t size;
+    ulong_t size;
 };
 #define SS_ONSTACK_ 1
 #define SS_DISABLE_ 2
 #define MINSIGSTKSZ_ 2048
-dword_t sys_sigaltstack(addr_t ss, addr_t old_ss);
+slong_t sys_sigaltstack(addr_t ss, addr_t old_ss);
 
-int_t sys_rt_sigsuspend(addr_t mask_addr, uint_t size);
-int_t sys_pause(void);
-int_t sys_rt_sigtimedwait(addr_t set_addr, addr_t info_addr, addr_t timeout_addr, uint_t set_size);
+slong_t sys_rt_sigsuspend(addr_t mask_addr, ulong_t size);
+slong_t sys_pause(void);
+slong_t sys_rt_sigtimedwait(addr_t set_addr, addr_t info_addr, addr_t timeout_addr, ulong_t set_size);
 
-dword_t sys_kill(pid_t_ pid, dword_t sig);
-dword_t sys_tkill(pid_t_ tid, dword_t sig);
-dword_t sys_tgkill(pid_t_ tgid, pid_t_ tid, dword_t sig);
+slong_t sys_kill(pid_t_ pid, dword_t sig);
+slong_t sys_tkill(pid_t_ tid, dword_t sig);
+slong_t sys_tgkill(pid_t_ tgid, pid_t_ tid, dword_t sig);
 
 // signal frame structs. There's a good chance this should go in its own header file
 
@@ -295,5 +309,57 @@ struct rt_sigframe_ {
 // everything align.
 extern int xsave_extra;
 extern int fxsave_extra;
+
+#if GUEST_X86_64
+
+// x86-64's signal frame, laid out as Linux's so a guest's libc can read the
+// ucontext a handler gets in rdx and return through the SA_RESTORER written
+// into pretcode. There is no vdso, so the restorer is always libc's.
+struct sigcontext_64 {
+    qword_t r8, r9, r10, r11, r12, r13, r14, r15;
+    qword_t rdi, rsi, rbp, rbx, rdx, rax, rcx, rsp;
+    qword_t rip;
+    qword_t eflags;
+    word_t cs, gs, fs, ss;
+    qword_t err;
+    qword_t trapno;
+    qword_t oldmask;
+    qword_t cr2;
+    qword_t fpstate; // a host pointer into the frame's fxsave area
+    qword_t reserved1[8];
+};
+
+// The fxsave area: 512 bytes, 16-byte aligned in the frame, Linux's exact
+// _fpstate_64. x87 registers are 80-bit extended (16 bytes each); the xmm
+// space holds all sixteen vector registers. blink keeps x87 as doubles, so a
+// save widens them back to 80-bit form (still only double precision, the
+// documented blink limit). The sw_reserved tail stays zero: no xstate header,
+// so a guest sees a legacy frame.
+struct fpstate_64 {
+    word_t cw, sw, tw, fop;
+    qword_t rip, rdp;
+    dword_t mxcsr, mxcsr_mask;
+    struct { qword_t significand; word_t signexp; word_t pad[3]; } st[8];
+    struct { qword_t lo, hi; } xmm[16];
+    byte_t reserved[96];
+};
+static_assert(sizeof(struct fpstate_64) == 512, "fxsave area is 512 bytes");
+
+struct ucontext_64 {
+    qword_t flags;
+    qword_t link;
+    struct stack_t_ stack; // already guest-width from milestone 5
+    struct sigcontext_64 mcontext;
+    sigset_t_ sigmask;
+};
+
+struct rt_sigframe_64 {
+    qword_t pretcode;
+    struct ucontext_64 uc;
+    struct siginfo_ info;
+    // the fxsave area follows, 16-byte aligned
+};
+
+#endif
 
 #endif

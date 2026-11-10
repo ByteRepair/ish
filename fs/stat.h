@@ -1,6 +1,7 @@
 #ifndef FS_STAT_H
 #define FS_STAT_H
 
+#include <assert.h>
 #include "misc.h"
 
 struct statbuf {
@@ -78,6 +79,37 @@ struct newstat64 {
     qword_t ino;
 } __attribute__((packed));
 
+// x86-64's struct stat, which is not i386's stat64 widened: the fields are
+// in another order, nlink is a long, and there is no second inode.
+struct stat_x86_64 {
+    qword_t dev;
+    qword_t ino;
+    qword_t nlink;
+    dword_t mode;
+    dword_t uid;
+    dword_t gid;
+    dword_t _pad0;
+    qword_t rdev;
+    sqword_t size;
+    sqword_t blksize;
+    sqword_t blocks;
+    qword_t atime;
+    qword_t atime_nsec;
+    qword_t mtime;
+    qword_t mtime_nsec;
+    qword_t ctime;
+    qword_t ctime_nsec;
+    sqword_t _unused[3];
+};
+static_assert(sizeof(struct stat_x86_64) == 144, "x86-64 struct stat");
+
+// What stat, fstat, lstat and fstatat write for this guest.
+#if GUEST_X86_64
+typedef struct stat_x86_64 guest_stat_t;
+#else
+typedef struct newstat64 guest_stat_t;
+#endif
+
 struct statfsbuf {
     long type;
     long bsize;
@@ -93,19 +125,20 @@ struct statfsbuf {
     long spare[4];
 };
 
+// Longs in Linux: x86-64's statfs is this with them widened.
 struct statfs_ {
-    uint_t type;
-    uint_t bsize;
-    uint_t blocks;
-    uint_t bfree;
-    uint_t bavail;
-    uint_t files;
-    uint_t ffree;
+    ulong_t type;
+    ulong_t bsize;
+    ulong_t blocks;
+    ulong_t bfree;
+    ulong_t bavail;
+    ulong_t files;
+    ulong_t ffree;
     uint64_t fsid;
-    uint_t namelen;
-    uint_t frsize;
-    uint_t flags;
-    uint_t spare[4];
+    ulong_t namelen;
+    ulong_t frsize;
+    ulong_t flags;
+    ulong_t spare[4];
 } __attribute__((packed));
 
 struct statfs64_ {

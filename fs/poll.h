@@ -33,6 +33,13 @@ struct poll {
 struct poll_fd {
     // locked by containing struct poll
     struct fd *fd;
+    // The guest's number for it: as on Linux, an entry is a number and the
+    // open file together, so two numbers for one file (a dup) are two
+    // entries. For a file the host polls, real_fd is the host fd registered
+    // for this entry: the file's own for the first, a dup of it for each
+    // other, since the host's poller holds a host fd once. -1 otherwise.
+    fd_t num;
+    int real_fd;
     struct list fds;
     int types;
     union poll_fd_info {
@@ -71,10 +78,10 @@ struct poll_event {
     int types;
 };
 struct poll *poll_create(void);
-bool poll_has_fd(struct poll *poll, struct fd *fd);
-int poll_add_fd(struct poll *poll, struct fd *fd, int types, union poll_fd_info info);
-int poll_mod_fd(struct poll *poll, struct fd *fd, int types, union poll_fd_info info);
-int poll_del_fd(struct poll *poll, struct fd *fd);
+bool poll_has_fd(struct poll *poll, struct fd *fd, fd_t num);
+int poll_add_fd(struct poll *poll, struct fd *fd, fd_t num, int types, union poll_fd_info info);
+int poll_mod_fd(struct poll *poll, struct fd *fd, fd_t num, int types, union poll_fd_info info);
+int poll_del_fd(struct poll *poll, struct fd *fd, fd_t num);
 // Indicates that the specified events have been triggered. Each call will
 // generate a new edge-triggered notification.
 // please do not call this while holding any locks you would acquire in your poll operation

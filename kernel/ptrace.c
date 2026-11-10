@@ -5,6 +5,16 @@
 #include "task.h"
 #include <string.h>
 
+#if GUEST_X86_64
+
+// ptrace reads and writes registers by i386's layouts throughout, and
+// nothing x86-64 needs it until a debugger does. See docs/blinkish.md.
+slong_t sys_ptrace(dword_t UNUSED(request), dword_t UNUSED(pid), addr_t UNUSED(addr), ulong_t UNUSED(data)) {
+    return _ENOSYS;
+}
+
+#else
+
 // Returns stopped child with the given pid, locked with the ptrace lock
 static struct task *find_child(pid_t_ pid) {
     struct task *child = NULL;
@@ -65,7 +75,7 @@ static void set_user_regs(struct cpu_state *cpu, struct user_regs_struct_ *user_
 //  cpu->xss = user_regs_->xss;
 }
 
-dword_t sys_ptrace(dword_t request, dword_t pid, addr_t addr, dword_t data) {
+slong_t sys_ptrace(dword_t request, dword_t pid, addr_t addr, ulong_t data) {
     switch (request) {
         case PTRACE_TRACEME_:
             STRACE("ptrace(PTRACE_TRACEME, %d, %#x, %#x)", pid, addr, data);
@@ -253,3 +263,5 @@ dword_t sys_ptrace(dword_t request, dword_t pid, addr_t addr, dword_t data) {
             return _EPERM;
     }
 }
+
+#endif

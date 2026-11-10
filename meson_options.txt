@@ -2,7 +2,10 @@ option('log', type: 'string', value: '')
 option('nolog', type: 'string', value: '')
 option('log_handler', type: 'string', value: 'dprintf')
 
-option('engine', type: 'combo', choices: ['asbestos', 'unicorn'], value: 'asbestos')
+option('engine', type: 'combo', choices: ['asbestos', 'unicorn', 'blink'], value: 'asbestos')
+# The guest's architecture. i386 is iSH as it has always been, on asbestos;
+# x86_64 is blinkish, on blink. See docs/blinkish.md.
+option('guest', type: 'combo', choices: ['i386', 'x86_64'], value: 'i386')
 option('kernel', type: 'combo', choices: ['ish', 'linux'], value: 'ish')
 option('kconfig', type: 'array', value: [])
 

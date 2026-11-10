@@ -4,7 +4,7 @@
 
 static struct fd_ops eventfd_ops;
 
-int_t sys_eventfd2(uint_t initval, int_t flags) {
+slong_t sys_eventfd2(uint_t initval, int_t flags) {
     STRACE("eventfd(%d, %#x)", initval, flags);
     if (flags & ~(O_CLOEXEC_|O_NONBLOCK_))
         return _EINVAL;
@@ -15,7 +15,7 @@ int_t sys_eventfd2(uint_t initval, int_t flags) {
     fd->eventfd.val = initval;
     return f_install(fd, flags);
 }
-int_t sys_eventfd(uint_t initval) {
+slong_t sys_eventfd(uint_t initval) {
     return sys_eventfd2(initval, 0);
 }
 

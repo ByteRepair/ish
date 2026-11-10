@@ -34,7 +34,7 @@ static fd_t sock_fd_create(int sock_fd, int domain, int type, int protocol) {
     return f_install(fd, type & ~SOCKET_TYPE_MASK);
 }
 
-int_t sys_socket(dword_t domain, dword_t type, dword_t protocol) {
+slong_t sys_socket(dword_t domain, dword_t type, dword_t protocol) {
     STRACE("socket(%d, %d, %d)", domain, type, protocol);
     int real_domain = sock_family_to_real(domain);
     if (real_domain < 0)
@@ -325,7 +325,7 @@ static int sockaddr_write(addr_t sockaddr_addr, void *sockaddr, uint_t buffer_le
     return 0;
 }
 
-int_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len) {
+slong_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len) {
     STRACE("bind(%d, 0x%x, %d)", sock_fd, sockaddr_addr, sockaddr_len);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -353,7 +353,7 @@ static void fill_cred(struct ucred_ *cred) {
     cred->gid = current->egid;
 }
 
-int_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len) {
+slong_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len) {
     STRACE("connect(%d, 0x%x, %d)", sock_fd, sockaddr_addr, sockaddr_len);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -384,7 +384,7 @@ int_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len) {
     return err;
 }
 
-int_t sys_listen(fd_t sock_fd, int_t backlog) {
+slong_t sys_listen(fd_t sock_fd, int_t backlog) {
     STRACE("listen(%d, %d)", sock_fd, backlog);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -396,7 +396,7 @@ int_t sys_listen(fd_t sock_fd, int_t backlog) {
     return err;
 }
 
-int_t sys_accept(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
+slong_t sys_accept(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
     STRACE("accept(%d, 0x%x, 0x%x)", sock_fd, sockaddr_addr, sockaddr_len_addr);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -463,7 +463,7 @@ static void copy_unix_name(char *sockaddr, dword_t *sockaddr_len, struct fd *soc
     *sockaddr_len = offsetof(struct sockaddr_, data) + name_len;
 }
 
-int_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
+slong_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
     STRACE("getsockname(%d, 0x%x, 0x%x)", sock_fd, sockaddr_addr, sockaddr_len_addr);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -495,7 +495,7 @@ int_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_ad
     return res;
 }
 
-int_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
+slong_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
     STRACE("getpeername(%d, 0x%x, 0x%x)", sock_fd, sockaddr_addr, sockaddr_len_addr);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -520,7 +520,7 @@ int_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_ad
     return res;
 }
 
-int_t sys_socketpair(dword_t domain, dword_t type, dword_t protocol, addr_t sockets_addr) {
+slong_t sys_socketpair(dword_t domain, dword_t type, dword_t protocol, addr_t sockets_addr) {
     STRACE("socketpair(%d, %d, %d, 0x%x)", domain, type, protocol, sockets_addr);
     int real_domain = sock_family_to_real(domain);
     if (real_domain < 0)
@@ -569,7 +569,7 @@ close_sockets:
     return err;
 }
 
-int_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, addr_t sockaddr_addr, dword_t sockaddr_len) {
+slong_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, ulong_t len, dword_t flags, addr_t sockaddr_addr, dword_t sockaddr_len) {
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
         return _EBADF;
@@ -601,7 +601,7 @@ error:
     return err;
 }
 
-int_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
+slong_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, ulong_t len, dword_t flags, addr_t sockaddr_addr, addr_t sockaddr_len_addr) {
     STRACE("recvfrom(%d, 0x%x, %d, %d, 0x%x, 0x%x)", sock_fd, buffer_addr, len, flags, sockaddr_addr, sockaddr_len_addr);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -640,15 +640,15 @@ int_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags,
     return res;
 }
 
-int_t sys_send(fd_t sock_fd, addr_t buf, dword_t len, int_t flags) {
+slong_t sys_send(fd_t sock_fd, addr_t buf, dword_t len, int_t flags) {
     return sys_sendto(sock_fd, buf, len, flags, 0, 0);
 }
 
-int_t sys_recv(fd_t sock_fd, addr_t buf, dword_t len, int_t flags) {
+slong_t sys_recv(fd_t sock_fd, addr_t buf, dword_t len, int_t flags) {
     return sys_recvfrom(sock_fd, buf, len, flags, 0, 0);
 }
 
-int_t sys_shutdown(fd_t sock_fd, dword_t how) {
+slong_t sys_shutdown(fd_t sock_fd, dword_t how) {
     STRACE("shutdown(%d, %d)", sock_fd, how);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -661,7 +661,7 @@ int_t sys_shutdown(fd_t sock_fd, dword_t how) {
 
 #define DEFAULT_TCP_CONGESTION "cubic"
 
-int_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t value_len) {
+slong_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t value_len) {
     STRACE("setsockopt(%d, %d, %d, 0x%x, %d)", sock_fd, level, option, value_addr, value_len);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -703,7 +703,7 @@ int_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_a
     return 0;
 }
 
-int_t sys_getsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t len_addr) {
+slong_t sys_getsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, addr_t len_addr) {
     STRACE("getsockopt(%d, %d, %d, %#x, %#x)", sock_fd, level, option, value_addr, len_addr);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -822,7 +822,7 @@ static void scm_free(struct scm *scm) {
     free(scm);
 }
 
-int_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags) {
+slong_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags) {
     int err;
     STRACE("sendmsg(%d, %#x, %d)", sock_fd, msghdr_addr, flags);
     struct fd *sock = sock_getfd(sock_fd);
@@ -971,7 +971,7 @@ out_free_iov:
     return err;
 }
 
-int_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags) {
+slong_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags) {
     STRACE("recvmsg(%d, %#x, %d)", sock_fd, msghdr_addr, flags);
     struct fd *sock = sock_getfd(sock_fd);
     if (sock == NULL)
@@ -1099,11 +1099,11 @@ struct mmsghdr_ {
     uint_t len;
 };
 
-int_t sys_sendmmsg(fd_t sock_fd, addr_t msg_vec, uint_t vec_len, int_t flags) {
+slong_t sys_sendmmsg(fd_t sock_fd, addr_t msg_vec, uint_t vec_len, int_t flags) {
     int num_sent = 0;
     for (unsigned i = 0; i < vec_len; i++) {
         addr_t msghdr = msg_vec + i * sizeof(struct mmsghdr_);
-        int_t res = sys_sendmsg(sock_fd, msghdr, flags);
+        slong_t res = sys_sendmsg(sock_fd, msghdr, flags);
         if (res >= 0) {
             addr_t msg_len_addr = msghdr + offsetof(struct mmsghdr_, len);
             if (user_put(msg_len_addr, res))
@@ -1219,7 +1219,7 @@ static struct socket_call {
     {(syscall_t) sys_sendmmsg, 4},
 };
 
-int_t sys_socketcall(dword_t call_num, addr_t args_addr) {
+slong_t sys_socketcall(dword_t call_num, addr_t args_addr) {
     STRACE("%d ", call_num);
     if (call_num < 1 || call_num >= sizeof(socket_calls)/sizeof(socket_calls[0]))
         return _EINVAL;

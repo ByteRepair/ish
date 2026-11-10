@@ -53,13 +53,19 @@ struct file_lock {
     struct list locks;
 };
 
+// i386's flock64, which is packed, and x86-64's flock, which is the same
+// fields laid out naturally
 struct flock_ {
     word_t type;
     word_t whence;
     off_t_ start;
     off_t_ len;
     pid_t_ pid;
-} __attribute__((packed));
+}
+#if !GUEST_X86_64
+__attribute__((packed))
+#endif
+;
 struct flock32_ {
     word_t type;
     word_t whence;

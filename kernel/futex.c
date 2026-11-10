@@ -1,10 +1,17 @@
 #include "kernel/calls.h"
 
+#include "kernel/time.h"
+
 #define FUTEX_WAIT_ 0
 #define FUTEX_WAKE_ 1
 #define FUTEX_REQUEUE_ 3
+#define FUTEX_WAIT_BITSET_ 9
+#define FUTEX_WAKE_BITSET_ 10
 #define FUTEX_PRIVATE_FLAG_ 128
-#define FUTEX_CMD_MASK_ ~(FUTEX_PRIVATE_FLAG_)
+#define FUTEX_CLOCK_REALTIME_ 256
+#define FUTEX_CMD_MASK_ ~(FUTEX_PRIVATE_FLAG_ | FUTEX_CLOCK_REALTIME_)
+// what FUTEX_WAIT and FUTEX_WAKE are, as the bitset ops
+#define FUTEX_BITSET_MATCH_ANY_ 0xffffffff
 
 struct futex {
     atomic_uint refcount;
@@ -18,6 +25,7 @@ struct futex_wait {
     cond_t cond;
     struct futex *futex; // will be changed by a requeue
     struct list queue;
+    dword_t bitset; // a wake reaches this waiter if its bitset shares a bit
 };
 
 #define FUTEX_HASH_BITS 12
@@ -42,10 +50,8 @@ static struct futex *futex_get_unlocked(addr_t addr) {
     }
 
     futex = malloc(sizeof(struct futex));
-    if (futex == NULL) {
-        unlock(&futex_lock);
+    if (futex == NULL)
         return NULL;
-    }
     futex->refcount = 1;
     futex->mem = current->mem;
     futex->addr = addr;
@@ -54,8 +60,9 @@ static struct futex *futex_get_unlocked(addr_t addr) {
     return futex;
 }
 
-// Returns the futex for the current process at the given addr, and locks it
-// Unlocked variant is available for times when you need to get two futexes at once
+// Returns the futex for the current process at the given addr, and locks it,
+// or NULL with nothing locked if there was no memory for one. Unlocked
+// variant is available for times when you need to get two futexes at once
 static struct futex *futex_get(addr_t addr) {
     lock(&futex_lock);
     struct futex *futex = futex_get_unlocked(addr);
@@ -90,8 +97,10 @@ static int futex_load(struct futex *futex, dword_t *out) {
     return 0;
 }
 
-static int futex_wait(addr_t uaddr, dword_t val, struct timespec *timeout) {
+static int futex_wait(addr_t uaddr, dword_t val, struct timespec *timeout, dword_t bitset) {
     struct futex *futex = futex_get(uaddr);
+    if (futex == NULL)
+        return _ENOMEM;
     int err = 0;
     dword_t tmp;
     if (futex_load(futex, &tmp))
@@ -102,6 +111,7 @@ static int futex_wait(addr_t uaddr, dword_t val, struct timespec *timeout) {
         struct futex_wait wait;
         wait.cond = COND_INITIALIZER;
         wait.futex = futex;
+        wait.bitset = bitset;
         list_add_tail(&futex->queue, &wait.queue);
         err = wait_for(&wait.cond, &futex_lock, timeout);
         futex = wait.futex;
@@ -112,14 +122,18 @@ static int futex_wait(addr_t uaddr, dword_t val, struct timespec *timeout) {
     return err;
 }
 
-static int futex_wakelike(int op, addr_t uaddr, dword_t wake_max, dword_t requeue_max, addr_t requeue_addr) {
+static int futex_wakelike(int op, addr_t uaddr, dword_t wake_max, dword_t requeue_max, addr_t requeue_addr, dword_t bitset) {
     struct futex *futex = futex_get(uaddr);
+    if (futex == NULL)
+        return _ENOMEM;
 
     struct futex_wait *wait, *tmp;
     unsigned woken = 0;
     list_for_each_entry_safe(&futex->queue, wait, tmp, queue) {
         if (woken >= wake_max)
             break;
+        if (!(wait->bitset & bitset))
+            continue;
         notify(&wait->cond);
         list_remove(&wait->queue);
         woken++;
@@ -127,6 +141,10 @@ static int futex_wakelike(int op, addr_t uaddr, dword_t wake_max, dword_t requeu
 
     if (op == FUTEX_REQUEUE_) {
         struct futex *futex2 = futex_get_unlocked(requeue_addr);
+        if (futex2 == NULL) {
+            futex_put(futex);
+            return _ENOMEM;
+        }
         unsigned requeued = 0;
         list_for_each_entry_safe(&futex->queue, wait, tmp, queue) {
             if (requeued >= requeue_max)
@@ -149,31 +167,49 @@ static int futex_wakelike(int op, addr_t uaddr, dword_t wake_max, dword_t requeu
 }
 
 int futex_wake(addr_t uaddr, dword_t wake_max) {
-    return futex_wakelike(FUTEX_WAKE_, uaddr, wake_max, 0, 0);
+    return futex_wakelike(FUTEX_WAKE_, uaddr, wake_max, 0, 0, FUTEX_BITSET_MATCH_ANY_);
 }
 
-dword_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2, addr_t uaddr2, dword_t val3) {
+// FUTEX_WAIT's timeout is relative; FUTEX_WAIT_BITSET's is a deadline, on
+// CLOCK_MONOTONIC unless FUTEX_CLOCK_REALTIME says otherwise.
+static int futex_timeout(dword_t op, addr_t addr, struct timespec *timeout) {
+    bool bitset = (op & FUTEX_CMD_MASK_) == FUTEX_WAIT_BITSET_;
+    uint_t clock = op & FUTEX_CLOCK_REALTIME_ ? CLOCK_REALTIME_ : CLOCK_MONOTONIC_;
+    return user_get_timeout(addr, clock, bitset, timeout);
+}
+
+slong_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2, addr_t uaddr2, dword_t val3) {
     if (!(op & FUTEX_PRIVATE_FLAG_)) {
         STRACE("!FUTEX_PRIVATE ");
     }
+    dword_t cmd = op & FUTEX_CMD_MASK_;
+    if ((op & FUTEX_CLOCK_REALTIME_) && cmd != FUTEX_WAIT_BITSET_)
+        return _ENOSYS;
+    if ((cmd == FUTEX_WAIT_BITSET_ || cmd == FUTEX_WAKE_BITSET_) && val3 == 0)
+        return _EINVAL;
     struct timespec timeout = {0};
-    if ((op & FUTEX_CMD_MASK_) == FUTEX_WAIT_ && timeout_or_val2) {
-        struct timespec_ timeout_;
-        if (user_get(timeout_or_val2, timeout_))
-            return _EFAULT;
-        timeout.tv_sec = timeout_.sec;
-        timeout.tv_nsec = timeout_.nsec;
+    if ((cmd == FUTEX_WAIT_ || cmd == FUTEX_WAIT_BITSET_) && timeout_or_val2) {
+        int err = futex_timeout(op, timeout_or_val2, &timeout);
+        if (err < 0)
+            return err;
     }
-    switch (op & FUTEX_CMD_MASK_) {
+    switch (cmd) {
         case FUTEX_WAIT_:
             STRACE("futex(FUTEX_WAIT, %#x, %d, 0x%x {%ds %dns}) = ...\n", uaddr, val, timeout_or_val2, timeout.tv_sec, timeout.tv_nsec);
-            return futex_wait(uaddr, val, timeout_or_val2 ? &timeout : NULL);
+            return futex_wait(uaddr, val, timeout_or_val2 ? &timeout : NULL, FUTEX_BITSET_MATCH_ANY_);
+        case FUTEX_WAIT_BITSET_:
+            STRACE("futex(FUTEX_WAIT_BITSET, %#x, %d, 0x%x {%ds %dns left}, %#x) = ...\n", uaddr, val, timeout_or_val2, timeout.tv_sec, timeout.tv_nsec, val3);
+            return futex_wait(uaddr, val, timeout_or_val2 ? &timeout : NULL, val3);
         case FUTEX_WAKE_:
             STRACE("futex(FUTEX_WAKE, %#x, %d)", uaddr, val);
-            return futex_wakelike(op & FUTEX_CMD_MASK_, uaddr, val, 0, 0);
+            return futex_wakelike(cmd, uaddr, val, 0, 0, FUTEX_BITSET_MATCH_ANY_);
+        case FUTEX_WAKE_BITSET_:
+            STRACE("futex(FUTEX_WAKE_BITSET, %#x, %d, %#x)", uaddr, val, val3);
+            return futex_wakelike(cmd, uaddr, val, 0, 0, val3);
         case FUTEX_REQUEUE_:
             STRACE("futex(FUTEX_REQUEUE, %#x, %d, %#x)", uaddr, val, uaddr2);
-            return futex_wakelike(op & FUTEX_CMD_MASK_, uaddr, val, timeout_or_val2, uaddr2);
+            // the timeout slot carries val2 here, cast down as Linux does
+            return futex_wakelike(cmd, uaddr, val, (dword_t) timeout_or_val2, uaddr2, FUTEX_BITSET_MATCH_ANY_);
     }
     STRACE("futex(%#x, %d, %d, timeout=%#x, %#x, %d) ", uaddr, op, val, timeout_or_val2, uaddr2, val3);
     FIXME("unsupported futex operation %d", op);
@@ -182,11 +218,11 @@ dword_t sys_futex(addr_t uaddr, dword_t op, dword_t val, addr_t timeout_or_val2,
 
 struct robust_list_head_ {
     addr_t list;
-    dword_t offset;
+    slong_t offset;
     addr_t list_op_pending;
 };
 
-int_t sys_set_robust_list(addr_t robust_list, dword_t len) {
+slong_t sys_set_robust_list(addr_t robust_list, ulong_t len) {
     STRACE("set_robust_list(%#x, %d)", robust_list, len);
     if (len != sizeof(struct robust_list_head_))
         return _EINVAL;
@@ -194,7 +230,7 @@ int_t sys_set_robust_list(addr_t robust_list, dword_t len) {
     return 0;
 }
 
-int_t sys_get_robust_list(pid_t_ pid, addr_t robust_list_ptr, addr_t len_ptr) {
+slong_t sys_get_robust_list(pid_t_ pid, addr_t robust_list_ptr, addr_t len_ptr) {
     STRACE("get_robust_list(%d, %#x, %#x)", pid, robust_list_ptr, len_ptr);
 
     lock(&pids_lock);
@@ -205,7 +241,7 @@ int_t sys_get_robust_list(pid_t_ pid, addr_t robust_list_ptr, addr_t len_ptr) {
 
     if (user_put(robust_list_ptr, current->robust_list))
         return _EFAULT;
-    if (user_put(len_ptr, (int[]) {sizeof(struct robust_list_head_)}))
+    if (user_put(len_ptr, (ulong_t[]) {sizeof(struct robust_list_head_)}))
         return _EFAULT;
     return 0;
 }

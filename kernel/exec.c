@@ -27,11 +27,11 @@ struct exec_args {
     const char *args;
 };
 
-static inline dword_t align_stack(dword_t sp);
-static inline ssize_t user_strlen(dword_t p);
-static inline int user_memset(addr_t start, byte_t val, dword_t len);
-static inline dword_t copy_string(dword_t sp, const char *string);
-static inline dword_t args_copy(dword_t sp, struct exec_args args);
+static inline addr_t align_stack(addr_t sp);
+static inline ssize_t user_strlen(addr_t p);
+static inline int user_memset(addr_t start, byte_t val, ulong_t len);
+static inline addr_t copy_string(addr_t sp, const char *string);
+static inline addr_t args_copy(addr_t sp, struct exec_args args);
 static size_t args_size(struct exec_args args);
 
 static int read_header(struct fd *fd, struct elf_header *header) {
@@ -45,10 +45,10 @@ static int read_header(struct fd *fd, struct elf_header *header) {
     }
     if (memcmp(&header->magic, ELF_MAGIC, sizeof(header->magic)) != 0
             || (header->type != ELF_EXECUTABLE && header->type != ELF_DYNAMIC)
-            || header->bitness != ELF_32BIT
+            || header->bitness != ELF_CLASS
             || header->endian != ELF_LITTLEENDIAN
             || header->elfversion1 != 1
-            || header->machine != ELF_X86)
+            || header->machine != ELF_MACHINE)
         return _ENOEXEC;
     return 0;
 }
@@ -95,12 +95,12 @@ static int load_entry(struct prg_header ph, addr_t bias, struct fd *fd) {
 
     if (memsize > filesize) {
         // put zeroes between addr + filesize and addr + memsize, call that bss
-        dword_t bss_size = memsize - filesize;
+        ulong_t bss_size = memsize - filesize;
 
         // first zero the tail from the end of the file mapping to the end
         // of the load entry or the end of the page, whichever comes first
         addr_t file_end = addr + filesize;
-        dword_t tail_size = PAGE_SIZE - PGOFFSET(file_end);
+        ulong_t tail_size = PAGE_SIZE - PGOFFSET(file_end);
         if (tail_size == PAGE_SIZE)
             // if you can calculate tail_size better and not have to do this please let me know
             tail_size = 0;
@@ -223,7 +223,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         if (!load_addr_set && header.type == ELF_DYNAMIC) {
             // see giant comment in linux/fs/binfmt_elf.c, around line 950
             if (interp_name)
-                bias = 0x56555000; // I have no idea how this number was arrived at
+                bias = MEM_PIE_BIAS;
             else
                 bias = find_hole_for_elf(&header, ph);
         }
@@ -258,6 +258,10 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         entry = interp_base + interp_header.entry_point;
     }
 
+#if GUEST_X86_64
+    // No vdso yet (milestone 7): musl calls the kernel for the time when
+    // AT_SYSINFO_EHDR is absent, and x86-64 has no vsyscall entry to give.
+#else
     // map vdso
     err = _ENOMEM;
     pages_t vdso_pages = sizeof(vdso_data) >> PAGE_BITS;
@@ -281,15 +285,16 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     if ((err = pt_map_nothing(current->mem, vvar_page, VVAR_PAGES, 0)) < 0)
         goto beyond_hope;
     mem_pt(current->mem, vvar_page)->data->name = "[vvar]";
+#endif
 
     // STACK TIME!
 
-    // allocate 1 page of stack at 0xffffd, and let it grow down
-    if ((err = pt_map_nothing(current->mem, 0xffffd, 1, P_WRITE | P_GROWSDOWN)) < 0)
+    // allocate 1 page of stack just below the top, and let it grow down
+    if ((err = pt_map_nothing(current->mem, PAGE(MEM_STACK_TOP) - 1, 1, P_WRITE | P_GROWSDOWN)) < 0)
         goto beyond_hope;
     // that was the last memory mapping
     write_wrunlock(&current->mem->lock);
-    dword_t sp = 0xffffe000;
+    addr_t sp = MEM_STACK_TOP;
     // on 32-bit linux, there's 4 empty bytes at the very bottom of the stack.
     // on 64-bit linux, there's 8. make ptraceomatic happy. (a major theme in this file)
     sp -= sizeof(void *);
@@ -310,7 +315,11 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     current->mm->argv_start = sp;
     sp = align_stack(sp);
 
+#if GUEST_X86_64
+    addr_t platform_addr = sp = copy_string(sp, "x86_64");
+#else
     addr_t platform_addr = sp = copy_string(sp, "i686");
+#endif
     if (sp == 0)
         goto beyond_hope;
     // 16 random bytes so no system call is needed to seed a userspace RNG
@@ -326,8 +335,10 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
 
     // declare elf aux now so we can know how big it is
     struct aux_ent aux[] = {
+#if !GUEST_X86_64
         {AX_SYSINFO, vdso_entry},
         {AX_SYSINFO_EHDR, current->mm->vdso},
+#endif
         {AX_HWCAP, 0x00000000}, // suck that
         {AX_PAGESZ, PAGE_SIZE},
         {AX_CLKTCK, 0x64},
@@ -348,7 +359,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         {AX_PLATFORM, platform_addr},
         {0, 0}
     };
-    sp -= ((argv.count + 1) + (envp.count + 1) + 1) * sizeof(dword_t);
+    sp -= ((argv.count + 1) + (envp.count + 1) + 1) * sizeof(addr_t);
     sp -= sizeof(aux);
     sp &=~ 0xf;
 
@@ -356,9 +367,11 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     addr_t p = sp;
 
     // argc
-    if (user_put(p, argv.count))
+    // argc is a guest word: a size_t would write past it into argv[0].
+    ulong_t argc_word = argv.count;
+    if (user_put(p, argc_word))
         return _EFAULT;
-    p += sizeof(dword_t);
+    p += sizeof(argc_word);
 
     // argv
     size_t argc = argv.count;
@@ -366,9 +379,9 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         if (user_put(p, argv_addr))
             return _EFAULT;
         argv_addr += user_strlen(argv_addr) + 1;
-        p += sizeof(dword_t); // null terminator
+        p += sizeof(addr_t);
     }
-    p += sizeof(dword_t); // null terminator
+    p += sizeof(addr_t); // null terminator
 
     // envp
     size_t envc = envp.count;
@@ -376,9 +389,9 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
         if (user_put(p, envp_addr))
             return _EFAULT;
         envp_addr += user_strlen(envp_addr) + 1;
-        p += sizeof(dword_t);
+        p += sizeof(addr_t);
     }
-    p += sizeof(dword_t); // null terminator
+    p += sizeof(addr_t); // null terminator
 
     // copy auxv
     current->mm->auxv_start = p;
@@ -388,6 +401,18 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     current->mm->auxv_end = p;
 
     current->mm->stack_start = sp;
+#if GUEST_X86_64
+    // what Linux starts an x86-64 process with: every register zero but the
+    // stack and instruction pointers, flags with only the reserved bit,
+    // SSE's default control word and x87's
+    current->cpu.r = (struct x86_64_regs) {
+        .rsp = sp,
+        .rip = entry,
+        .rflags = 0x2,
+        .mxcsr = 0x1f80,
+        .x87 = {.cw = 0x37f},
+    };
+#else
     current->cpu.esp = sp;
     current->cpu.eip = entry;
     current->cpu.fcw = 0x37f;
@@ -405,6 +430,7 @@ static int elf_exec(struct fd *fd, const char *file, struct exec_args argv, stru
     current->cpu.ebp = 0;
     collapse_flags(&current->cpu);
     current->cpu.eflags = 0;
+#endif
 
     err = 0;
 out_free_interp:
@@ -435,18 +461,18 @@ static size_t args_size(struct exec_args args) {
     return args_end - args.args;
 }
 
-static inline dword_t align_stack(addr_t sp) {
+static inline addr_t align_stack(addr_t sp) {
     return sp &~ 0xf;
 }
 
-static inline dword_t copy_string(addr_t sp, const char *string) {
+static inline addr_t copy_string(addr_t sp, const char *string) {
     sp -= strlen(string) + 1;
     if (user_write_string(sp, string))
         return 0;
     return sp;
 }
 
-static inline dword_t args_copy(addr_t sp, struct exec_args args) {
+static inline addr_t args_copy(addr_t sp, struct exec_args args) {
     size_t size = args_size(args);
     sp -= size;
     if (user_write(sp, args.args, size))
@@ -465,7 +491,7 @@ static inline ssize_t user_strlen(addr_t p) {
     return i - 1;
 }
 
-static inline int user_memset(addr_t start, byte_t val, dword_t len) {
+static inline int user_memset(addr_t start, byte_t val, ulong_t len) {
     while (len--)
         if (user_put(start++, val))
             return 1;
@@ -674,7 +700,7 @@ static ssize_t user_read_string_array(addr_t addr, char *buf, size_t max) {
     return i;
 }
 
-dword_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
+slong_t sys_execve(addr_t filename_addr, addr_t argv_addr, addr_t envp_addr) {
     char filename[MAX_PATH];
     if (user_read_string(filename_addr, filename, sizeof(filename)))
         return _EFAULT;

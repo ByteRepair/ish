@@ -9,24 +9,24 @@
 #include "misc.h"
 #include "debug.h"
 
-int_t sys_socketcall(dword_t call_num, addr_t args_addr);
+slong_t sys_socketcall(dword_t call_num, addr_t args_addr);
 
-int_t sys_socket(dword_t domain, dword_t type, dword_t protocol);
-int_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
-int_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
-int_t sys_listen(fd_t sock_fd, int_t backlog);
-int_t sys_accept(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_socketpair(dword_t domain, dword_t type, dword_t protocol, addr_t sockets_addr);
-int_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, addr_t sockaddr_addr, dword_t sockaddr_len);
-int_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, dword_t len, dword_t flags, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
-int_t sys_shutdown(fd_t sock_fd, dword_t how);
-int_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t value_len);
-int_t sys_getsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t len_addr);
-int_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
-int_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
-int_t sys_sendmmsg(fd_t sock_fd, addr_t msgvec_addr, uint_t msgvec_len, int_t flags);
+slong_t sys_socket(dword_t domain, dword_t type, dword_t protocol);
+slong_t sys_bind(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
+slong_t sys_connect(fd_t sock_fd, addr_t sockaddr_addr, uint_t sockaddr_len);
+slong_t sys_listen(fd_t sock_fd, int_t backlog);
+slong_t sys_accept(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_getsockname(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_getpeername(fd_t sock_fd, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_socketpair(dword_t domain, dword_t type, dword_t protocol, addr_t sockets_addr);
+slong_t sys_sendto(fd_t sock_fd, addr_t buffer_addr, ulong_t len, dword_t flags, addr_t sockaddr_addr, dword_t sockaddr_len);
+slong_t sys_recvfrom(fd_t sock_fd, addr_t buffer_addr, ulong_t len, dword_t flags, addr_t sockaddr_addr, addr_t sockaddr_len_addr);
+slong_t sys_shutdown(fd_t sock_fd, dword_t how);
+slong_t sys_setsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, dword_t value_len);
+slong_t sys_getsockopt(fd_t sock_fd, dword_t level, dword_t option, addr_t value_addr, addr_t len_addr);
+slong_t sys_sendmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
+slong_t sys_recvmsg(fd_t sock_fd, addr_t msghdr_addr, int_t flags);
+slong_t sys_sendmmsg(fd_t sock_fd, addr_t msgvec_addr, uint_t msgvec_len, int_t flags);
 
 #define SOCKADDR_DATA_MAX 108
 
@@ -47,21 +47,21 @@ struct msghdr_ {
     addr_t msg_name;
     uint_t msg_namelen;
     addr_t msg_iov;
-    uint_t msg_iovlen;
+    ulong_t msg_iovlen;
     addr_t msg_control;
-    uint_t msg_controllen;
+    ulong_t msg_controllen;
     int_t msg_flags;
 };
 
 struct cmsghdr_ {
-    dword_t len;
+    ulong_t len;
     int_t level;
     int_t type;
     uint8_t data[];
 };
 #define SCM_RIGHTS_ 1
 // copied and ported from musl
-#define CMSG_LEN_(cmsg) (((cmsg)->len + sizeof(dword_t) - 1) & ~(dword_t)(sizeof(dword_t) - 1))
+#define CMSG_LEN_(cmsg) (((cmsg)->len + sizeof(ulong_t) - 1) & ~(ulong_t)(sizeof(ulong_t) - 1))
 #define CMSG_NEXT_(cmsg) ((uint8_t *)(cmsg) + CMSG_LEN_(cmsg))
 #define CMSG_NXTHDR_(cmsg, mhdr_end) ((cmsg)->len < sizeof (struct cmsghdr_) || \
         CMSG_LEN_(cmsg) + sizeof(struct cmsghdr_) >= (size_t) (mhdr_end - (uint8_t *)(cmsg)) \
@@ -183,8 +183,13 @@ static inline int sock_flags_from_real(int real) {
 #define SO_TIMESTAMP_ 29
 #define SO_PROTOCOL_ 38
 #define SO_DOMAIN_ 39
+#if GUEST_X86_64
+#define SO_RCVTIMEO_ 20
+#define SO_SNDTIMEO_ 21
+#else
 #define SO_RCVTIMEO_ 66
 #define SO_SNDTIMEO_ 67
+#endif
 #define IP_TOS_ 1
 #define IP_TTL_ 2
 #define IP_HDRINCL_ 3
