@@ -6,22 +6,239 @@
 #include "kernel/signal.h"
 #include "kernel/task.h"
 
-dword_t syscall_stub(void) {
+slong_t syscall_stub(void) {
     return _ENOSYS;
 }
 // While identical, this version of the stub doesn't log below. Use this for
 // syscalls that are optional (i.e. fallback on something else) but called
 // frequently.
-dword_t syscall_silent_stub(void) {
+slong_t syscall_silent_stub(void) {
     return _ENOSYS;
 }
-dword_t syscall_success_stub(void) {
+slong_t syscall_success_stub(void) {
     return 0;
 }
 
 #if is_gcc(8) || is_clang(21)
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
+#if GUEST_X86_64
+
+// x86-64's numbers. The handlers are i386's, with the structs they read and
+// write spelled in guest longs or given each guest's own layout, so the
+// same handler is right for either; what is x86-64's alone (six-argument
+// mmap, whole 64-bit offsets, arch_prctl, getrlimit's 64-bit struct) is
+// under GUEST_X86_64 beside the handler it shares the work with. clone goes
+// through sys_clone64, which swaps the child-tid and TLS arguments.
+syscall_t syscall_table[] = {
+    [0]   = (syscall_t) sys_read,
+    [1]   = (syscall_t) sys_write,
+    [2]   = (syscall_t) sys_open,
+    [3]   = (syscall_t) sys_close,
+    [4]   = (syscall_t) sys_stat64,
+    [5]   = (syscall_t) sys_fstat64,
+    [6]   = (syscall_t) sys_lstat64,
+    [7]   = (syscall_t) sys_poll,
+    [8]   = (syscall_t) sys_lseek,
+    [9]   = (syscall_t) sys_mmap,
+    [10]  = (syscall_t) sys_mprotect,
+    [11]  = (syscall_t) sys_munmap,
+    [12]  = (syscall_t) sys_brk,
+    [13]  = (syscall_t) sys_rt_sigaction,
+    [14]  = (syscall_t) sys_rt_sigprocmask,
+    [15]  = (syscall_t) sys_rt_sigreturn, // frames are milestone 6
+    [16]  = (syscall_t) sys_ioctl,
+    [17]  = (syscall_t) sys_pread64,
+    [18]  = (syscall_t) sys_pwrite64,
+    [19]  = (syscall_t) sys_readv,
+    [20]  = (syscall_t) sys_writev,
+    [21]  = (syscall_t) sys_access,
+    [22]  = (syscall_t) sys_pipe,
+    [23]  = (syscall_t) sys_select,
+    [24]  = (syscall_t) sys_sched_yield,
+    [25]  = (syscall_t) sys_mremap,
+    [26]  = (syscall_t) sys_msync,
+    [28]  = (syscall_t) sys_madvise,
+    [32]  = (syscall_t) sys_dup,
+    [33]  = (syscall_t) sys_dup2,
+    [34]  = (syscall_t) sys_pause,
+    [35]  = (syscall_t) sys_nanosleep,
+    [37]  = (syscall_t) sys_alarm,
+    [38]  = (syscall_t) sys_setitimer,
+    [39]  = (syscall_t) sys_getpid,
+    [40]  = (syscall_t) sys_sendfile64, // x86-64's takes a 64-bit offset
+    [41]  = (syscall_t) sys_socket,
+    [42]  = (syscall_t) sys_connect,
+    [43]  = (syscall_t) sys_accept,
+    [44]  = (syscall_t) sys_sendto,
+    [45]  = (syscall_t) sys_recvfrom,
+    [46]  = (syscall_t) sys_sendmsg,
+    [47]  = (syscall_t) sys_recvmsg,
+    [48]  = (syscall_t) sys_shutdown,
+    [49]  = (syscall_t) sys_bind,
+    [50]  = (syscall_t) sys_listen,
+    [51]  = (syscall_t) sys_getsockname,
+    [52]  = (syscall_t) sys_getpeername,
+    [53]  = (syscall_t) sys_socketpair,
+    [54]  = (syscall_t) sys_setsockopt,
+    [55]  = (syscall_t) sys_getsockopt,
+    [56]  = (syscall_t) sys_clone64,
+    [57]  = (syscall_t) sys_fork,
+    [58]  = (syscall_t) sys_vfork,
+    [59]  = (syscall_t) sys_execve,
+    [60]  = (syscall_t) sys_exit,
+    [61]  = (syscall_t) sys_wait4,
+    [62]  = (syscall_t) sys_kill,
+    [63]  = (syscall_t) sys_uname,
+    [72]  = (syscall_t) sys_fcntl,
+    [73]  = (syscall_t) sys_flock,
+    [74]  = (syscall_t) sys_fsync,
+    [75]  = (syscall_t) sys_fsync, // fdatasync
+    [76]  = (syscall_t) sys_truncate,
+    [77]  = (syscall_t) sys_ftruncate,
+    [78]  = (syscall_t) sys_getdents,
+    [79]  = (syscall_t) sys_getcwd,
+    [80]  = (syscall_t) sys_chdir,
+    [81]  = (syscall_t) sys_fchdir,
+    [82]  = (syscall_t) sys_rename,
+    [83]  = (syscall_t) sys_mkdir,
+    [84]  = (syscall_t) sys_rmdir,
+    [86]  = (syscall_t) sys_link,
+    [87]  = (syscall_t) sys_unlink,
+    [88]  = (syscall_t) sys_symlink,
+    [89]  = (syscall_t) sys_readlink,
+    [90]  = (syscall_t) sys_chmod,
+    [91]  = (syscall_t) sys_fchmod,
+    [92]  = (syscall_t) sys_chown32,
+    [93]  = (syscall_t) sys_fchown32,
+    [94]  = (syscall_t) sys_lchown,
+    [95]  = (syscall_t) sys_umask,
+    [96]  = (syscall_t) sys_gettimeofday,
+    [97]  = (syscall_t) sys_getrlimit,
+    [98]  = (syscall_t) sys_getrusage,
+    [99]  = (syscall_t) sys_sysinfo,
+    [100] = (syscall_t) sys_times,
+    [101] = (syscall_t) sys_ptrace,
+    [102] = (syscall_t) sys_getuid,
+    [103] = (syscall_t) sys_syslog,
+    [104] = (syscall_t) sys_getgid,
+    [105] = (syscall_t) sys_setuid,
+    [106] = (syscall_t) sys_setgid,
+    [107] = (syscall_t) sys_geteuid,
+    [108] = (syscall_t) sys_getegid,
+    [109] = (syscall_t) sys_setpgid,
+    [110] = (syscall_t) sys_getppid,
+    [111] = (syscall_t) sys_getpgrp,
+    [112] = (syscall_t) sys_setsid,
+    [113] = (syscall_t) sys_setreuid,
+    [114] = (syscall_t) sys_setregid,
+    [115] = (syscall_t) sys_getgroups,
+    [116] = (syscall_t) sys_setgroups,
+    [117] = (syscall_t) sys_setresuid,
+    [118] = (syscall_t) sys_getresuid,
+    [119] = (syscall_t) sys_setresgid,
+    [120] = (syscall_t) sys_getresgid,
+    [121] = (syscall_t) sys_getpgid,
+    [124] = (syscall_t) sys_getsid,
+    [125] = (syscall_t) sys_capget,
+    [126] = (syscall_t) sys_capset,
+    [127] = (syscall_t) sys_rt_sigpending,
+    [128] = (syscall_t) sys_rt_sigtimedwait,
+    [130] = (syscall_t) sys_rt_sigsuspend,
+    [131] = (syscall_t) sys_sigaltstack,
+    [132] = (syscall_t) sys_utime,
+    [133] = (syscall_t) sys_mknod,
+    [135] = (syscall_t) sys_personality,
+    [137] = (syscall_t) sys_statfs,
+    [138] = (syscall_t) sys_fstatfs,
+    [140] = (syscall_t) sys_getpriority,
+    [141] = (syscall_t) sys_setpriority,
+    [143] = (syscall_t) sys_sched_getparam,
+    [144] = (syscall_t) sys_sched_setscheduler,
+    [145] = (syscall_t) sys_sched_getscheduler,
+    [146] = (syscall_t) sys_sched_get_priority_max,
+    [149] = (syscall_t) sys_mlock,
+    [157] = (syscall_t) sys_prctl,
+    [158] = (syscall_t) sys_arch_prctl,
+    [160] = (syscall_t) sys_setrlimit,
+    [161] = (syscall_t) sys_chroot,
+    [162] = (syscall_t) syscall_success_stub, // sync
+    [164] = (syscall_t) sys_settimeofday,
+    [165] = (syscall_t) sys_mount,
+    [166] = (syscall_t) sys_umount2,
+    [169] = (syscall_t) sys_reboot,
+    [170] = (syscall_t) sys_sethostname,
+    [186] = (syscall_t) sys_gettid,
+    [188 ... 199] = (syscall_t) sys_xattr_stub,
+    [200] = (syscall_t) sys_tkill,
+    [201] = (syscall_t) sys_time,
+    [202] = (syscall_t) sys_futex,
+    [203] = (syscall_t) sys_sched_setaffinity,
+    [204] = (syscall_t) sys_sched_getaffinity,
+    [205] = (syscall_t) sys_set_thread_area,
+    [213] = (syscall_t) sys_epoll_create0,
+    [217] = (syscall_t) sys_getdents64,
+    [218] = (syscall_t) sys_set_tid_address,
+    [222] = (syscall_t) sys_timer_create,
+    [223] = (syscall_t) sys_timer_settime,
+    [226] = (syscall_t) sys_timer_delete,
+    [227] = (syscall_t) sys_clock_settime,
+    [228] = (syscall_t) sys_clock_gettime,
+    [229] = (syscall_t) sys_clock_getres,
+    [230] = (syscall_t) sys_clock_nanosleep,
+    [231] = (syscall_t) sys_exit_group,
+    [232] = (syscall_t) sys_epoll_wait,
+    [233] = (syscall_t) sys_epoll_ctl,
+    [234] = (syscall_t) sys_tgkill,
+    [235] = (syscall_t) sys_utimes,
+    [237] = (syscall_t) sys_mbind,
+    [247] = (syscall_t) sys_waitid,
+    [251] = (syscall_t) sys_ioprio_set,
+    [252] = (syscall_t) sys_ioprio_get,
+    [257] = (syscall_t) sys_openat,
+    [258] = (syscall_t) sys_mkdirat,
+    [259] = (syscall_t) sys_mknodat,
+    [260] = (syscall_t) sys_fchownat,
+    [262] = (syscall_t) sys_fstatat64, // newfstatat
+    [263] = (syscall_t) sys_unlinkat,
+    [264] = (syscall_t) sys_renameat,
+    [265] = (syscall_t) sys_linkat,
+    [266] = (syscall_t) sys_symlinkat,
+    [267] = (syscall_t) sys_readlinkat,
+    [268] = (syscall_t) sys_fchmodat,
+    [269] = (syscall_t) sys_faccessat,
+    [270] = (syscall_t) sys_pselect, // pselect6
+    [271] = (syscall_t) sys_ppoll,
+    [273] = (syscall_t) sys_set_robust_list,
+    [274] = (syscall_t) sys_get_robust_list,
+    [275] = (syscall_t) sys_splice,
+    [280] = (syscall_t) sys_utimensat,
+    [281] = (syscall_t) sys_epoll_pwait,
+    [282] = (syscall_t) sys_signalfd,
+    [283] = (syscall_t) sys_timerfd_create,
+    [284] = (syscall_t) sys_eventfd,
+    [285] = (syscall_t) sys_fallocate,
+    [286] = (syscall_t) sys_timerfd_settime,
+    [288] = (syscall_t) syscall_stub, // accept4
+    [289] = (syscall_t) sys_signalfd4,
+    [290] = (syscall_t) sys_eventfd2,
+    [291] = (syscall_t) sys_epoll_create,
+    [292] = (syscall_t) sys_dup3,
+    [293] = (syscall_t) sys_pipe2,
+    [295] = (syscall_t) sys_preadv,
+    [302] = (syscall_t) sys_prlimit64,
+    [307] = (syscall_t) sys_sendmmsg,
+    [316] = (syscall_t) sys_renameat2,
+    [318] = (syscall_t) sys_getrandom,
+    [324] = (syscall_t) syscall_silent_stub, // membarrier
+    [326] = (syscall_t) sys_copy_file_range,
+    [327] = (syscall_t) sys_preadv2,
+    [332] = (syscall_t) sys_statx,
+    [439] = (syscall_t) syscall_silent_stub, // faccessat2
+};
+
+#else
+
 syscall_t syscall_table[] = {
     [1]   = (syscall_t) sys_exit,
     [2]   = (syscall_t) sys_fork,
@@ -186,6 +403,7 @@ syscall_t syscall_table[] = {
     [264] = (syscall_t) sys_clock_settime,
     [265] = (syscall_t) sys_clock_gettime,
     [266] = (syscall_t) sys_clock_getres,
+    [267] = (syscall_t) sys_clock_nanosleep,
     [268] = (syscall_t) sys_statfs64,
     [269] = (syscall_t) sys_fstatfs64,
     [270] = (syscall_t) sys_tgkill,
@@ -215,10 +433,12 @@ syscall_t syscall_table[] = {
     [313] = (syscall_t) sys_splice,
     [319] = (syscall_t) sys_epoll_pwait,
     [320] = (syscall_t) sys_utimensat,
+    [321] = (syscall_t) sys_signalfd,
     [322] = (syscall_t) sys_timerfd_create,
     [323] = (syscall_t) sys_eventfd,
     [324] = (syscall_t) sys_fallocate,
     [325] = (syscall_t) sys_timerfd_settime,
+    [327] = (syscall_t) sys_signalfd4,
     [328] = (syscall_t) sys_eventfd2,
     [329] = (syscall_t) sys_epoll_create,
     [330] = (syscall_t) sys_dup3,
@@ -252,6 +472,8 @@ syscall_t syscall_table[] = {
     [439] = (syscall_t) syscall_silent_stub, // faccessat2
 };
 
+#endif
+
 #define NUM_SYSCALLS (sizeof(syscall_table) / sizeof(syscall_table[0]))
 
 void dump_stack(int lines);
@@ -259,18 +481,18 @@ void dump_stack(int lines);
 void handle_interrupt(int interrupt) {
     struct cpu_state *cpu = &current->cpu;
     if (interrupt == INT_SYSCALL) {
-        unsigned syscall_num = cpu->eax;
+        ulong_t syscall_num = CPU_SYSCALL_NR(cpu);
         if (syscall_num >= NUM_SYSCALLS || syscall_table[syscall_num] == NULL) {
             printk("%d(%s) missing syscall %d\n", current->pid, current->comm, syscall_num);
-            cpu->eax = _ENOSYS;
+            CPU_SYSCALL_RESULT(cpu) = _ENOSYS;
         } else {
             if (syscall_table[syscall_num] == (syscall_t) syscall_stub) {
                 printk("%d(%s) stub syscall %d\n", current->pid, current->comm, syscall_num);
             }
             STRACE("%d call %-3d ", current->pid, syscall_num);
-            int result = syscall_table[syscall_num](cpu->ebx, cpu->ecx, cpu->edx, cpu->esi, cpu->edi, cpu->ebp);
+            slong_t result = syscall_table[syscall_num](CPU_SYSCALL_ARGS(cpu));
             STRACE(" = 0x%x\n", result);
-            cpu->eax = result;
+            CPU_SYSCALL_RESULT(cpu) = result;
         }
     } else if (interrupt == INT_GPF) {
         // some page faults, such as stack growing or CoW clones, are handled by mem_ptr
@@ -278,7 +500,7 @@ void handle_interrupt(int interrupt) {
         void *ptr = mem_ptr(current->mem, cpu->segfault_addr, cpu->segfault_was_write ? MEM_WRITE : MEM_READ);
         read_wrunlock(&current->mem->lock);
         if (ptr == NULL) {
-            printk("%d page fault on 0x%x at 0x%x\n", current->pid, cpu->segfault_addr, cpu->eip);
+            printk("%d page fault on 0x%x at 0x%x\n", current->pid, cpu->segfault_addr, CPU_IP(cpu));
             struct siginfo_ info = {
                 .code = mem_segv_reason(current->mem, cpu->segfault_addr),
                 .fault.addr = cpu->segfault_addr,
@@ -287,10 +509,10 @@ void handle_interrupt(int interrupt) {
             deliver_signal(current, SIGSEGV_, info);
         }
     } else if (interrupt == INT_UNDEFINED) {
-        printk("%d illegal instruction at 0x%x: ", current->pid, cpu->eip);
+        printk("%d illegal instruction at 0x%x: ", current->pid, CPU_IP(cpu));
         for (int i = 0; i < 8; i++) {
             uint8_t b;
-            if (user_get(cpu->eip + i, b))
+            if (user_get(CPU_IP(cpu) + i, b))
                 break;
             printk("%02x ", b);
         }
@@ -298,9 +520,16 @@ void handle_interrupt(int interrupt) {
         dump_stack(8);
         struct siginfo_ info = {
             .code = SI_KERNEL_,
-            .fault.addr = cpu->eip,
+            .fault.addr = CPU_IP(cpu),
         };
         deliver_signal(current, SIGILL_, info);
+    } else if (interrupt == INT_DIV || interrupt == INT_FPU) {
+        // asbestos raises neither; blink raises both
+        struct siginfo_ info = {
+            .code = interrupt == INT_DIV ? FPE_INTDIV_ : FPE_FLTINV_,
+            .fault.addr = CPU_IP(cpu),
+        };
+        deliver_signal(current, SIGFPE_, info);
     } else if (interrupt == INT_BREAKPOINT) {
         lock(&pids_lock);
         send_signal(current, SIGTRAP_, (struct siginfo_) {
@@ -361,8 +590,8 @@ void dump_mem(addr_t start, uint_t len) {
 }
 
 void dump_stack(int lines) {
-    printk("stack at %x, base at %x, ip at %x\n", current->cpu.esp, current->cpu.ebp, current->cpu.eip);
-    dump_mem(current->cpu.esp, lines * sizeof(dword_t) * 8);
+    printk("stack at %x, base at %x, ip at %x\n", CPU_SP(&current->cpu), CPU_BP(&current->cpu), CPU_IP(&current->cpu));
+    dump_mem(CPU_SP(&current->cpu), lines * sizeof(dword_t) * 8);
 }
 
 // TODO find a home for this

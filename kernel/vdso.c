@@ -10,7 +10,10 @@ __asm__(".data\n"
         ".incbin \"vdso/libvdso.so.elf\"\n"
         ".skip "str(VDSO_PAGES)" * (1 << 12) - (. - vdso_data)\n");
 
-int vdso_symbol(const char *name) {
+// The vdso is i386's, parsed as ELF32; x86-64 maps none yet (milestone 7)
+// and nothing asks it for a symbol.
+#if !GUEST_X86_64
+addr_t vdso_symbol(const char *name) {
     struct elf_header *header = (void *) vdso_data;
     struct prg_header *ph = (void *) ((char *) header + header->prghead_off);
 
@@ -58,3 +61,4 @@ fail:
     fflush(stderr);
     abort();
 }
+#endif

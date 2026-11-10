@@ -85,7 +85,7 @@ static int do_syslog(int type, addr_t buf_addr, int_t len) {
             return _EINVAL;
     }
 }
-int_t sys_syslog(int_t type, addr_t buf_addr, int_t len) {
+slong_t sys_syslog(int_t type, addr_t buf_addr, int_t len) {
     lock(&log_lock);
     int retval = do_syslog(type, buf_addr, len);
     unlock(&log_lock);

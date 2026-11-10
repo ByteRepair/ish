@@ -3,9 +3,7 @@
 #include "kernel/calls.h"
 #include "platform/platform.h"
 
-#if __APPLE__
-#include <sys/sysctl.h>
-#elif __linux__
+#if __linux__
 #include <sys/sysinfo.h>
 #endif
 
@@ -24,11 +22,15 @@ void do_uname(struct uname *uts) {
     strcpy(uts->hostname, hostname);
     strcpy(uts->release, "4.20.69-ish");
     snprintf(uts->version, sizeof(uts->version), "%s %s %s", uname_version, __DATE__, __TIME__);
+#if GUEST_X86_64
+    strcpy(uts->arch, "x86_64");
+#else
     strcpy(uts->arch, "i686");
+#endif
     strcpy(uts->domain, "(none)");
 }
 
-dword_t sys_uname(addr_t uts_addr) {
+slong_t sys_uname(addr_t uts_addr) {
     struct uname uts;
     do_uname(&uts);
     if (user_put(uts_addr, uts))
@@ -36,19 +38,19 @@ dword_t sys_uname(addr_t uts_addr) {
     return 0;
 }
 
-dword_t sys_sethostname(addr_t UNUSED(hostname_addr), dword_t UNUSED(hostname_len)) {
+slong_t sys_sethostname(addr_t UNUSED(hostname_addr), dword_t UNUSED(hostname_len)) {
     return _EPERM;
 }
 
 #if __APPLE__
-static uint64_t get_total_ram(void) {
-    uint64_t total_ram;
-    sysctl((int []) {CTL_DEBUG, HW_PHYSMEM}, 2, &total_ram, NULL, NULL, 0);
-    return total_ram;
-}
+// Memory in bytes where the guest's long holds it and in pages where it
+// does not, as Linux counts it: a total is totalram times mem_unit.
 static void sysinfo_specific(struct sys_info *info) {
-    info->totalram = get_total_ram();
-    // TODO: everything else
+    struct mem_usage usage = get_mem_usage();
+    uint64_t unit = usage.total <= (ulong_t) -1 ? 1 : PAGE_SIZE;
+    info->totalram = usage.total / unit;
+    info->freeram = usage.free / unit;
+    info->mem_unit = unit;
 }
 #elif __linux__
 static void sysinfo_specific(struct sys_info *info) {
@@ -66,7 +68,7 @@ static void sysinfo_specific(struct sys_info *info) {
 }
 #endif
 
-dword_t sys_sysinfo(addr_t info_addr) {
+slong_t sys_sysinfo(addr_t info_addr) {
     struct sys_info info = {0};
     struct uptime_info uptime = get_uptime();
     info.uptime = uptime.uptime_ticks;

@@ -16,7 +16,7 @@ static fd_t pipe_f_create(int pipe_fd, int flags) {
     return f_install(fd, flags);
 }
 
-int_t sys_pipe2(addr_t pipe_addr, int_t flags) {
+slong_t sys_pipe2(addr_t pipe_addr, int_t flags) {
     STRACE("pipe2(%#x, %#x)", pipe_addr, flags);
     if (flags & ~(O_CLOEXEC_|O_NONBLOCK_)) {
         FIXME("unsupported pipe2 flags");
@@ -52,6 +52,6 @@ close_pipe:
     return err;
 }
 
-int_t sys_pipe(addr_t pipe_addr) {
+slong_t sys_pipe(addr_t pipe_addr) {
     return sys_pipe2(pipe_addr, 0);
 }

@@ -3,6 +3,8 @@
 #include "tools/ptraceomatic-config.h"
 
 extern const char vdso_data[VDSO_PAGES * (1 << 12)] __asm__("vdso_data");
-int vdso_symbol(const char *name);
+#if !GUEST_X86_64
+addr_t vdso_symbol(const char *name);
+#endif
 
 #endif

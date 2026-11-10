@@ -22,6 +22,14 @@ endforeach
 add_project_arguments('-DLOG_HANDLER_' + get_option('log_handler').to_upper() + '=1', language: 'c')
 add_project_arguments('-DENGINE_' + get_option('engine').to_upper() + '=1', language: 'c')
 
+guest = get_option('guest')
+if guest == 'x86_64' and get_option('engine') != 'blink'
+    error('An x86_64 guest runs on the blink engine: pass -Dengine=blink')
+elif guest == 'i386' and get_option('engine') == 'blink'
+    error('The blink engine runs an x86_64 guest: pass -Dguest=x86_64')
+endif
+add_project_arguments('-DGUEST_X86_64=' + (guest == 'x86_64' ? '1' : '0'), language: 'c')
+
 if get_option('no_crlf')
     add_project_arguments('-DNO_CRLF', language: 'c')
 endif
@@ -43,30 +51,60 @@ offsets = custom_target('offsets',
     output: 'cpu-offsets.h', input: 'asbestos/offsets.c', depfile: 'cpu-offsets.h.d',
     command: [find_program('tools/staticdefine.sh'), '@OUTDIR@/compile_commands.json', '@INPUT@', '@OUTPUT@', '@DEPFILE@'])
 
-emu_src = [
-    'emu/tlb.c',
-    'emu/fpu.c',
-    'emu/vec.c',
-    'emu/mmx.c',
-    'emu/float80.c',
-
-]
-gadgets = 'asbestos/gadgets-' + host_machine.cpu_family()
-emu_src += [
-    'asbestos/asbestos.c',
-    'asbestos/gen.c',
-    'asbestos/helpers.c',
-    gadgets+'/entry.S',
-    gadgets+'/memory.S',
-    gadgets+'/control.S',
-    gadgets+'/math.S',
-    gadgets+'/bits.S',
-    gadgets+'/string.S',
-    gadgets+'/misc.S',
-    offsets,
-]
-
+# The TLB is the engine's cache of the kernel's page table, and either
+# engine uses it; the rest is the engine itself.
+emu_src = ['emu/tlb.c']
+if get_option('engine') == 'asbestos'
+    gadgets = 'asbestos/gadgets-' + host_machine.cpu_family()
+    emu_src += [
+        'emu/fpu.c',
+        'emu/vec.c',
+        'emu/mmx.c',
+        'emu/float80.c',
+        'asbestos/asbestos.c',
+        'asbestos/gen.c',
+        'asbestos/helpers.c',
+        gadgets+'/entry.S',
+        gadgets+'/memory.S',
+        gadgets+'/control.S',
+        gadgets+'/math.S',
+        gadgets+'/bits.S',
+        gadgets+'/string.S',
+        gadgets+'/misc.S',
+        offsets,
+    ]
+elif get_option('engine') == 'blink'
+    emu_src += ['emu/blink/engine.c']
+endif
 libish_emu = library('ish_emu', emu_src, include_directories: includes)
+
+if get_option('engine') == 'blink'
+    # blink's interpreter and nothing of its kernel side: decode, execute,
+    # and the memory and flag helpers instructions use. emu/blink/interp.c
+    # supplies the halt path, the syscall instruction and the address
+    # translation blink's dropped files would have. Compiled with blink's
+    # own headers and configuration, apart from iSH's.
+    blink_files = [
+        'abort', 'address', 'alu', 'alu1', 'alu2', 'alui', 'assert', 'bcd',
+        'bit', 'bitscan', 'bmi2', 'bus', 'clmul', 'cmpxchg', 'cpuid', 'crc32',
+        'cvt', 'divmul', 'errfd', 'errno', 'flags', 'fpu', 'instruction', 'jit',
+        'ldbl', 'legacy', 'log', 'machine', 'memory', 'mmx', 'modrm', 'op101',
+        'popcount', 'pte32', 'random', 'rdrand', 'reset', 'sse', 'sse2', 'sse4',
+        'ssefloat', 'ssemov', 'stack', 'string', 'time', 'uop', 'x86', 'xadd',
+        'xchg', 'breg', 'vigna', 'dll', 'memccpy',
+    ]
+    blink_src = ['emu/blink/interp.c']
+    foreach f : blink_files
+        blink_src += 'deps/blink/blink/' + f + '.c'
+    endforeach
+    libblink = static_library('blink', blink_src,
+        include_directories: include_directories('emu/blink/config', 'deps/blink', '.'),
+        c_args: ['-DNOLINEAR', '-DNDEBUG', '-D_GNU_SOURCE', '-D_DARWIN_C_SOURCE',
+                 '-D_DEFAULT_SOURCE', '-D_BSD_SOURCE', '-D_FILE_OFFSET_BITS=64',
+                 '-Wno-unused-parameter', '-Wno-sign-compare', '-Wno-missing-field-initializers'],
+        override_options: ['warning_level=1'])
+    libish_emu = [libish_emu, libblink]
+endif
 
 libfakefs = library('fakefs',
     ['fs/fake-db.c', 'fs/fake-migrate.c', 'fs/fake-rebuild.c'],
@@ -76,8 +114,8 @@ libfakefs = library('fakefs',
 subdir('deps')
 
 if get_option('kernel') == 'ish'
-    if get_option('engine') != 'asbestos'
-        error('Only asbestos is supported with ish kernel')
+    if get_option('engine') == 'unicorn'
+        error('The unicorn engine runs only under the linux kernel')
     endif
 
     src = [
@@ -106,6 +144,7 @@ if get_option('kernel') == 'ish'
         'kernel/random.c',
         'kernel/misc.c',
         'kernel/eventfd.c',
+        'kernel/signalfd.c',
         'kernel/ipc.c',
         'kernel/ptrace.c',
 
@@ -163,6 +202,17 @@ if get_option('kernel') == 'ish'
 
     if not meson.is_cross_build()
         executable('ish', ['main.c'], dependencies: ish)
+    endif
+
+    if not meson.is_cross_build()
+        # the memory layer alone, for whichever guest this build is
+        memory_test = executable('memory_test', 'tests/unit/memory_test.c', dependencies: ish)
+        test('memory', memory_test)
+        if guest == 'x86_64'
+            # the blink engine on hand-assembled x86-64, no loader or kernel
+            engine_test = executable('engine_test', 'tests/unit/engine_test.c', dependencies: ish)
+            test('engine', engine_test)
+        endif
     endif
 
 elif get_option('kernel') == 'linux'

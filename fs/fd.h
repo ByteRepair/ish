@@ -36,6 +36,10 @@ struct fd {
             uint64_t val;
         } eventfd;
         struct {
+            uint64_t mask; // the signals it reads, a sigset_t_
+            struct list fds; // on the list every signalfd is on
+        } signalfd;
+        struct {
             struct timer *timer;
             uint64_t expirations;
         } timerfd;

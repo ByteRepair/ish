@@ -20,8 +20,8 @@ static void fd_seekdir(struct fd *fd, unsigned long off) {
 }
 
 struct linux_dirent_ {
-    dword_t inode;
-    dword_t offset;
+    ulong_t inode;
+    ulong_t offset;
     word_t reclen;
     char name[];
 } __attribute__((packed));
@@ -56,7 +56,7 @@ size_t fill_dirent_64(void *dirent_data, ino_t inode, off_t_ offset, const char 
     return dirent->reclen;
 }
 
-int_t sys_getdents_common(fd_t f, addr_t dirents, dword_t count,
+slong_t sys_getdents_common(fd_t f, addr_t dirents, dword_t count,
         size_t (*fill_dirent)(void *, ino_t, off_t_, const char *, int)) {
     STRACE("getdents(%d, %#x, %#x)", f, dirents, count);
     struct fd *fd = f_get(f);
@@ -104,11 +104,11 @@ int_t sys_getdents_common(fd_t f, addr_t dirents, dword_t count,
     return orig_count - count;
 }
 
-int_t sys_getdents(fd_t f, addr_t dirents, uint_t count) {
+slong_t sys_getdents(fd_t f, addr_t dirents, uint_t count) {
     return sys_getdents_common(f, dirents, count, fill_dirent_32);
 }
 
-int_t sys_getdents64(fd_t f, addr_t dirents, uint_t count) {
+slong_t sys_getdents64(fd_t f, addr_t dirents, uint_t count) {
     return sys_getdents_common(f, dirents, count, fill_dirent_64);
 }
 

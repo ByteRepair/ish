@@ -3,7 +3,7 @@
 
 static struct fd_ops epoll_ops;
 
-fd_t sys_epoll_create(int_t flags) {
+slong_t sys_epoll_create(int_t flags) {
     STRACE("epoll_create(%#x)", flags);
     if (flags & ~(O_CLOEXEC_))
         return _EINVAL;
@@ -17,7 +17,7 @@ fd_t sys_epoll_create(int_t flags) {
     fd->epollfd.poll = poll;
     return f_install(fd, flags);
 }
-fd_t sys_epoll_create0(void) {
+slong_t sys_epoll_create0(void) {
     return sys_epoll_create(0);
 }
 
@@ -32,7 +32,7 @@ struct epoll_event_ {
 #define EPOLLET_ (1 << 31)
 #define EPOLLONESHOT_ (1 << 30)
 
-int_t sys_epoll_ctl(fd_t epoll_f, int_t op, fd_t f, addr_t event_addr) {
+slong_t sys_epoll_ctl(fd_t epoll_f, int_t op, fd_t f, addr_t event_addr) {
     STRACE("epoll_ctl(%d, %d, %d, %#x)", epoll_f, op, f, event_addr);
     struct fd *epoll = f_get(epoll_f);
     if (epoll == NULL)
@@ -44,7 +44,7 @@ int_t sys_epoll_ctl(fd_t epoll_f, int_t op, fd_t f, addr_t event_addr) {
         return _EBADF;
 
     if (op == EPOLL_CTL_DEL_)
-        return poll_del_fd(epoll->epollfd.poll, fd);
+        return poll_del_fd(epoll->epollfd.poll, fd, f);
 
     struct epoll_event_ event;
     if (user_get(event_addr, event))
@@ -52,11 +52,11 @@ int_t sys_epoll_ctl(fd_t epoll_f, int_t op, fd_t f, addr_t event_addr) {
     STRACE(" {events: %#x, data: %#x}", event.events, event.data);
 
     if (op == EPOLL_CTL_ADD_) {
-        if (poll_has_fd(epoll->epollfd.poll, fd))
+        if (poll_has_fd(epoll->epollfd.poll, fd, f))
             return _EEXIST;
-        return poll_add_fd(epoll->epollfd.poll, fd, event.events, (union poll_fd_info) event.data);
+        return poll_add_fd(epoll->epollfd.poll, fd, f, event.events, (union poll_fd_info) event.data);
     } else {
-        return poll_mod_fd(epoll->epollfd.poll, fd, event.events, (union poll_fd_info) event.data);
+        return poll_mod_fd(epoll->epollfd.poll, fd, f, event.events, (union poll_fd_info) event.data);
     }
 }
 
@@ -74,7 +74,7 @@ static int epoll_callback(void *context, int types, union poll_fd_info info) {
     return 1;
 }
 
-int_t sys_epoll_wait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t timeout) {
+slong_t sys_epoll_wait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t timeout) {
     STRACE("epoll_wait(%d, %#x, %d, %d)", epoll_f, events_addr, max_events, timeout);
     struct fd *epoll = f_get(epoll_f);
     if (epoll == NULL)
@@ -105,7 +105,7 @@ int_t sys_epoll_wait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t t
     return res;
 }
 
-int_t sys_epoll_pwait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t timeout, addr_t sigmask_addr, dword_t sigsetsize) {
+slong_t sys_epoll_pwait(fd_t epoll_f, addr_t events_addr, int_t max_events, int_t timeout, addr_t sigmask_addr, ulong_t sigsetsize) {
     sigset_t_ mask;
     if (sigmask_addr != 0) {
         if (sigsetsize != sizeof(sigset_t_))

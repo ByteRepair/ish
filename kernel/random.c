@@ -18,7 +18,7 @@ int get_random(char *buf, size_t len) {
 #endif
 }
 
-dword_t sys_getrandom(addr_t buf_addr, dword_t len, dword_t UNUSED(flags)) {
+slong_t sys_getrandom(addr_t buf_addr, ulong_t len, dword_t UNUSED(flags)) {
     if (len > 1 << 20)
         return _EIO;
     char *buf = malloc(len);

@@ -98,11 +98,16 @@ noreturn void do_exit(int status) {
         } else {
             leader->zombie = true;
             notify(&parent->group->child_exit);
+            // As Linux tells it: exited with a code, or killed (and maybe
+            // dumped) by a signal, rather than the raw wait status. A program
+            // reading SIGCHLD from a signalfd reaps on CLD_EXITED and kin.
+            int raw = current->exit_code;
+            bool signalled = (raw & 0x7f) != 0;
             struct siginfo_ info = {
-                .code = SI_KERNEL_,
+                .code = !signalled ? CLD_EXITED_ : (raw & 0x80) ? CLD_DUMPED_ : CLD_KILLED_,
                 .child.pid = current->pid,
                 .child.uid = current->uid,
-                .child.status = current->exit_code,
+                .child.status = signalled ? raw & 0x7f : (raw >> 8) & 0xff,
                 .child.utime = clock_from_timeval(group_rusage.utime),
                 .child.stime = clock_from_timeval(group_rusage.stime),
             };
@@ -152,7 +157,12 @@ static void halt_system(void) {
         int tasks_found = 0;
         for (int i = 2; i < MAX_PID; i++) {
             struct task *task = pid_get_task(i);
-            if (task != NULL) {
+            // A task that has been through do_exit and is not yet a zombie
+            // is a group leader whose threads outlived it. It gave its
+            // sighand back with its thread, so there is nothing of it to
+            // signal: the threads still running are signalled under their
+            // own pids.
+            if (task != NULL && !task->exiting) {
                 tasks_found++;
                 switch (state) {
                 case 0:
@@ -181,12 +191,12 @@ static void halt_system(void) {
     unlock(&mounts_lock);
 }
 
-dword_t sys_exit(dword_t status) {
+slong_t sys_exit(dword_t status) {
     STRACE("exit(%d)\n", status);
     do_exit(status << 8);
 }
 
-dword_t sys_exit_group(dword_t status) {
+slong_t sys_exit_group(dword_t status) {
     STRACE("exit_group(%d)\n", status);
     do_exit_group(status << 8);
 }
@@ -345,7 +355,7 @@ error:
     return err;
 }
 
-dword_t sys_waitid(int_t idtype, pid_t_ id, addr_t info_addr, int_t options) {
+slong_t sys_waitid(int_t idtype, pid_t_ id, addr_t info_addr, int_t options) {
     STRACE("waitid(%d, %d, %#x, %#x)", idtype, id, info_addr, options);
     struct siginfo_ info = {};
     int_t res = do_wait(idtype, id, &info, NULL, options);
@@ -356,7 +366,7 @@ dword_t sys_waitid(int_t idtype, pid_t_ id, addr_t info_addr, int_t options) {
     return 0;
 }
 
-dword_t sys_wait4(pid_t_ id, addr_t status_addr, dword_t options, addr_t rusage_addr) {
+slong_t sys_wait4(pid_t_ id, addr_t status_addr, dword_t options, addr_t rusage_addr) {
     STRACE("wait4(%d, %#x, %#x, %#x)", id, status_addr, options, rusage_addr);
     if (options & WNOWAIT_)
         return _EINVAL;
@@ -386,6 +396,6 @@ dword_t sys_wait4(pid_t_ id, addr_t status_addr, dword_t options, addr_t rusage_
     return info.child.pid;
 }
 
-dword_t sys_waitpid(pid_t_ pid, addr_t status_addr, dword_t options) {
+slong_t sys_waitpid(pid_t_ pid, addr_t status_addr, dword_t options) {
     return sys_wait4(pid, status_addr, options, 0);
 }

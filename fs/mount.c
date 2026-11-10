@@ -122,7 +122,7 @@ bool mount_param_flag(const char *info, const char *flag) {
 #define MS_SUPPORTED (MS_READONLY_|MS_NOSUID_|MS_NODEV_|MS_NOEXEC_|MS_SILENT_)
 #define MS_FLAGS (MS_READONLY_|MS_NOSUID_|MS_NODEV_|MS_NOEXEC_)
 
-dword_t sys_mount(addr_t source_addr, addr_t point_addr, addr_t type_addr, dword_t flags, addr_t data_addr) {
+slong_t sys_mount(addr_t source_addr, addr_t point_addr, addr_t type_addr, ulong_t flags, addr_t data_addr) {
     char source[MAX_PATH];
     if (user_read_string(source_addr, source, sizeof(source)))
         return _EFAULT;
@@ -174,7 +174,7 @@ dword_t sys_mount(addr_t source_addr, addr_t point_addr, addr_t type_addr, dword
 
 #define UMOUNT_NOFOLLOW_ 8
 
-dword_t sys_umount2(addr_t target_addr, dword_t flags) {
+slong_t sys_umount2(addr_t target_addr, dword_t flags) {
     char target_raw[MAX_PATH];
     if (user_read_string(target_addr, target_raw, sizeof(target_raw)))
         return _EFAULT;

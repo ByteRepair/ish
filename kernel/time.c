@@ -12,12 +12,20 @@
 #include "kernel/time.h"
 #include "fs/poll.h"
 
+// The host has one wall clock and one that only goes forward, and every
+// guest clock but the CPU-time ones is one of the two: the coarse ones are
+// the same clock read with less care, and macOS's monotonic clock already
+// counts the time asleep that boot time adds.
 static int clockid_to_real(uint_t clock, clockid_t *real) {
     switch (clock) {
         case CLOCK_REALTIME_:
         case CLOCK_REALTIME_COARSE_:
             *real = CLOCK_REALTIME; break;
-        case CLOCK_MONOTONIC_: *real = CLOCK_MONOTONIC; break;
+        case CLOCK_MONOTONIC_:
+        case CLOCK_MONOTONIC_RAW_:
+        case CLOCK_MONOTONIC_COARSE_:
+        case CLOCK_BOOTTIME_:
+            *real = CLOCK_MONOTONIC; break;
         default: return _EINVAL;
     }
     return 0;
@@ -43,19 +51,19 @@ static struct itimerspec_ timer_spec_from_real(struct timer_spec spec) {
     return itspec;
 };
 
-dword_t sys_time(addr_t time_out) {
-    dword_t now = time(NULL);
+slong_t sys_time(addr_t time_out) {
+    time_t_ now = time(NULL);
     if (time_out != 0)
         if (user_put(time_out, now))
             return _EFAULT;
     return now;
 }
 
-dword_t sys_stime(addr_t UNUSED(time)) {
+slong_t sys_stime(addr_t UNUSED(time)) {
     return _EPERM;
 }
 
-dword_t sys_clock_gettime(dword_t clock, addr_t tp) {
+slong_t sys_clock_gettime(dword_t clock, addr_t tp) {
     STRACE("clock_gettime(%d, 0x%x)", clock, tp);
 
     struct timespec ts;
@@ -80,7 +88,7 @@ dword_t sys_clock_gettime(dword_t clock, addr_t tp) {
     return 0;
 }
 
-dword_t sys_clock_getres(dword_t clock, addr_t res_addr) {
+slong_t sys_clock_getres(dword_t clock, addr_t res_addr) {
     STRACE("clock_getres(%d, %#x)", clock, res_addr);
     clockid_t clock_id;
     if (clockid_to_real(clock, &clock_id)) return _EINVAL;
@@ -97,7 +105,7 @@ dword_t sys_clock_getres(dword_t clock, addr_t res_addr) {
     return 0;
 }
 
-dword_t sys_clock_settime(dword_t UNUSED(clock), addr_t UNUSED(tp)) {
+slong_t sys_clock_settime(dword_t UNUSED(clock), addr_t UNUSED(tp)) {
     return _EPERM;
 }
 
@@ -124,7 +132,7 @@ static int itimer_set(struct tgroup *group, int which, struct timer_spec spec, s
     return timer_set(group->itimer, spec, old_spec);
 }
 
-int_t sys_setitimer(int_t which, addr_t new_val_addr, addr_t old_val_addr) {
+slong_t sys_setitimer(int_t which, addr_t new_val_addr, addr_t old_val_addr) {
     struct itimerval_ val;
     if (user_get(new_val_addr, val))
         return _EFAULT;
@@ -158,7 +166,7 @@ int_t sys_setitimer(int_t which, addr_t new_val_addr, addr_t old_val_addr) {
     return 0;
 }
 
-uint_t sys_alarm(uint_t seconds) {
+slong_t sys_alarm(uint_t seconds) {
     STRACE("alarm(%d)", seconds);
     struct timer_spec spec = {
         .value.tv_sec = seconds,
@@ -181,28 +189,64 @@ uint_t sys_alarm(uint_t seconds) {
     return seconds;
 }
 
-dword_t sys_nanosleep(addr_t req_addr, addr_t rem_addr) {
-    struct timespec_ req_ts;
-    if (user_get(req_addr, req_ts))
-        return _EFAULT;
-    STRACE("nanosleep({%d, %d}, 0x%x", req_ts.sec, req_ts.nsec, rem_addr);
-    struct timespec req;
-    req.tv_sec = req_ts.sec;
-    req.tv_nsec = req_ts.nsec;
+// Sleeps on the host for req, and on an interruption tells the guest what
+// was left if it asked.
+static slong_t sleep_for(struct timespec req, addr_t rem_addr) {
     struct timespec rem;
-    if (nanosleep(&req, &rem) < 0)
-        return errno_map();
-    if (rem_addr != 0) {
-        struct timespec_ rem_ts;
-        rem_ts.sec = rem.tv_sec;
-        rem_ts.nsec = rem.tv_nsec;
-        if (user_put(rem_addr, rem_ts))
-            return _EFAULT;
+    if (nanosleep(&req, &rem) < 0) {
+        int err = errno_map();
+        if (err == _EINTR && rem_addr != 0) {
+            struct timespec_ rem_ts = {.sec = rem.tv_sec, .nsec = rem.tv_nsec};
+            if (user_put(rem_addr, rem_ts))
+                return _EFAULT;
+        }
+        return err;
     }
     return 0;
 }
 
-dword_t sys_times(addr_t tbuf) {
+int user_get_timeout(addr_t addr, uint_t clock, bool absolute, struct timespec *left) {
+    clockid_t clock_id;
+    int err = clockid_to_real(clock, &clock_id);
+    if (err < 0)
+        return err;
+    struct timespec_ ts;
+    if (user_get(addr, ts))
+        return _EFAULT;
+    if ((slong_t) ts.sec < 0 || ts.nsec >= 1000000000)
+        return _EINVAL;
+    *left = convert_timespec(ts);
+    if (absolute) {
+        *left = timespec_subtract(*left, timespec_now(clock_id));
+        if (!timespec_positive(*left))
+            *left = (struct timespec) {0};
+    }
+    return 0;
+}
+
+slong_t sys_nanosleep(addr_t req_addr, addr_t rem_addr) {
+    STRACE("nanosleep(%#x, %#x)", req_addr, rem_addr);
+    struct timespec req;
+    int err = user_get_timeout(req_addr, CLOCK_MONOTONIC_, false, &req);
+    if (err < 0)
+        return err;
+    return sleep_for(req, rem_addr);
+}
+
+// What Rust's thread::sleep calls on Linux. Like Linux, an absolute deadline
+// leaves rem alone, since restarting the call with it is the whole of
+// carrying on.
+slong_t sys_clock_nanosleep(dword_t clock, dword_t flags, addr_t req_addr, addr_t rem_addr) {
+    STRACE("clock_nanosleep(%d, %#x, %#x, %#x)", clock, flags, req_addr, rem_addr);
+    bool absolute = flags & TIMER_ABSTIME_;
+    struct timespec req;
+    int err = user_get_timeout(req_addr, clock, absolute, &req);
+    if (err < 0)
+        return err;
+    return sleep_for(req, absolute ? 0 : rem_addr);
+}
+
+slong_t sys_times(addr_t tbuf) {
     STRACE("times(0x%x)", tbuf);
     if (tbuf) {
         struct tms_ tmp;
@@ -217,7 +261,7 @@ dword_t sys_times(addr_t tbuf) {
     return 0;
 }
 
-dword_t sys_gettimeofday(addr_t tv, addr_t tz) {
+slong_t sys_gettimeofday(addr_t tv, addr_t tz) {
     STRACE("gettimeofday(0x%x, 0x%x)", tv, tz);
     struct timeval timeval;
     struct timezone timezone;
@@ -236,7 +280,7 @@ dword_t sys_gettimeofday(addr_t tv, addr_t tz) {
     return 0;
 }
 
-dword_t sys_settimeofday(addr_t UNUSED(tv), addr_t UNUSED(tz)) {
+slong_t sys_settimeofday(addr_t UNUSED(tv), addr_t UNUSED(tz)) {
     return _EPERM;
 }
 
@@ -261,7 +305,7 @@ static void posix_timer_callback(struct posix_timer *timer) {
 #define SIGEV_NONE_ 1
 #define SIGEV_THREAD_ID_ 4
 
-int_t sys_timer_create(dword_t clock, addr_t sigevent_addr, addr_t timer_addr) {
+slong_t sys_timer_create(dword_t clock, addr_t sigevent_addr, addr_t timer_addr) {
     STRACE("timer_create(%d, %#x, %#x)", clock, sigevent_addr, timer_addr);
     clockid_t real_clockid;
     if (clockid_to_real(clock, &real_clockid))
@@ -312,9 +356,7 @@ int_t sys_timer_create(dword_t clock, addr_t sigevent_addr, addr_t timer_addr) {
     return 0;
 }
 
-#define TIMER_ABSTIME_ (1 << 0)
-
-int_t sys_timer_settime(dword_t timer_id, int_t flags, addr_t new_value_addr, addr_t old_value_addr) {
+slong_t sys_timer_settime(dword_t timer_id, int_t flags, addr_t new_value_addr, addr_t old_value_addr) {
     STRACE("timer_settime(%d, %d, %#x, %#x)", timer_id, flags, new_value_addr, old_value_addr);
     struct itimerspec_ value;
     if (user_get(new_value_addr, value))
@@ -343,7 +385,7 @@ int_t sys_timer_settime(dword_t timer_id, int_t flags, addr_t new_value_addr, ad
     return 0;
 }
 
-int_t sys_timer_delete(dword_t timer_id) {
+slong_t sys_timer_delete(dword_t timer_id) {
     STRACE("timer_delete(%d)\n", timer_id);
     lock(&current->group->lock);
     struct posix_timer *timer = &current->group->posix_timers[timer_id];
@@ -367,7 +409,7 @@ static void timerfd_callback(struct fd *fd) {
     poll_wakeup(fd, POLL_READ);
 }
 
-fd_t sys_timerfd_create(int_t clockid, int_t flags) {
+slong_t sys_timerfd_create(int_t clockid, int_t flags) {
     STRACE("timerfd_create(%d, %#x)", clockid, flags);
     clockid_t real_clockid;
     if (clockid_to_real(clockid, &real_clockid)) return _EINVAL;
@@ -380,7 +422,7 @@ fd_t sys_timerfd_create(int_t clockid, int_t flags) {
     return f_install(fd, flags);
 }
 
-int_t sys_timerfd_settime(fd_t f, int_t flags, addr_t new_value_addr, addr_t old_value_addr) {
+slong_t sys_timerfd_settime(fd_t f, int_t flags, addr_t new_value_addr, addr_t old_value_addr) {
     STRACE("timerfd_settime(%d, %d, %#x, %#x)", f, flags, new_value_addr, old_value_addr);
     if (flags & ~(TIMER_ABSTIME_))
         return _EINVAL;

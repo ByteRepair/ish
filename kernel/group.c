@@ -3,7 +3,7 @@
 #include "kernel/task.h"
 #include "fs/tty.h"
 
-dword_t sys_setpgid(pid_t_ id, pid_t_ pgid) {
+slong_t sys_setpgid(pid_t_ id, pid_t_ pgid) {
     STRACE("setpgid(%d, %d)", id, pgid);
     int err;
     if (id == 0)
@@ -55,11 +55,11 @@ out:
     return err;
 }
 
-dword_t sys_setpgrp(void) {
+slong_t sys_setpgrp(void) {
     return sys_setpgid(0, 0);
 }
 
-pid_t_ sys_getpgid(pid_t_ pid) {
+slong_t sys_getpgid(pid_t_ pid) {
     STRACE("getpgid(%d)", pid);
     lock(&pids_lock);
     struct task *task = current;
@@ -73,7 +73,7 @@ pid_t_ sys_getpgid(pid_t_ pid) {
     unlock(&pids_lock);
     return pid;
 }
-pid_t_ sys_getpgrp(void) {
+slong_t sys_getpgrp(void) {
     return sys_getpgid(0);
 }
 
@@ -116,12 +116,12 @@ pid_t_ task_setsid(struct task *task) {
     return new_sid;
 }
 
-dword_t sys_setsid(void) {
+slong_t sys_setsid(void) {
     STRACE("setsid()");
     return task_setsid(current);
 }
 
-dword_t sys_getsid(void) {
+slong_t sys_getsid(void) {
     STRACE("getsid()");
     lock(&pids_lock);
     pid_t_ sid = current->group->sid;

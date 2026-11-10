@@ -188,31 +188,29 @@ void proc_maps_dump(struct task *task, struct proc_data *buf) {
         return;
 
     read_wrlock(&mem->lock);
-    page_t page = 0;
+    page_t page = mem_next_mapped(mem, 0);
     while (page < MEM_PAGES) {
-        // find a region
-        while (page < MEM_PAGES && mem_pt(mem, page) == NULL) {
-            mem_next_page(mem, &page);
-        }
-        if (page >= MEM_PAGES)
-            break;
         page_t start = page;
         struct pt_entry *start_pt = mem_pt(mem, start);
         struct data *data = start_pt->data;
 
-        // find the end of said region
-        while (page < MEM_PAGES) {
-            struct pt_entry *pt = mem_pt(mem, page);
-            if (pt == NULL)
+        // find the end of said region: the first page that is unmapped or
+        // unlike the start, after which the next region begins
+        page_t next;
+        while (true) {
+            next = mem_next_mapped(mem, page + 1);
+            if (next != page + 1)
                 break;
+            struct pt_entry *pt = mem_pt(mem, next);
             if ((pt->flags & P_RWX) != (start_pt->flags & P_RWX))
                 break;
             // region continues if data is the same or both are anonymous
             if (!(pt->data == data || (pt->flags & P_ANONYMOUS && start_pt->flags & P_ANONYMOUS)))
                 break;
-            mem_next_page(mem, &page);
+            page = next;
         }
-        page_t end = page;
+        page_t end = page + 1;
+        page = next;
 
         // output info
         char path[MAX_PATH] = "";
@@ -223,8 +221,8 @@ void proc_maps_dump(struct task *task, struct proc_data *buf) {
         } else if (data->fd != NULL) {
             generic_getpath(start_pt->data->fd, path);
         }
-        proc_printf(buf, "%08x-%08x %c%c%c%c %08lx 00:00 %-10d %s\n",
-                start << PAGE_BITS, end << PAGE_BITS,
+        proc_printf(buf, "%08llx-%08llx %c%c%c%c %08lx 00:00 %-10d %s\n",
+                (unsigned long long) start << PAGE_BITS, (unsigned long long) end << PAGE_BITS,
                 start_pt->flags & P_READ ? 'r' : '-',
                 start_pt->flags & P_WRITE ? 'w' : '-',
                 start_pt->flags & P_EXEC ? 'x' : '-',

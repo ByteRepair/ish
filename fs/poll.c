@@ -58,13 +58,34 @@ static inline bool poll_fd_is_real(struct poll_fd *pollfd) {
 }
 
 // does not do its own locking
-static struct poll_fd *poll_find_fd(struct poll *poll, struct fd *fd) {
+static struct poll_fd *poll_find_fd(struct poll *poll, struct fd *fd, fd_t num) {
     struct poll_fd *poll_fd, *tmp;
     list_for_each_entry_safe(&poll->poll_fds, poll_fd, tmp, fds) {
-        if (poll_fd->fd == fd)
+        if (poll_fd->fd == fd && poll_fd->num == num)
             return poll_fd;
     }
     return NULL;
+}
+
+// The host fd a new entry for fd registers: the file's own, unless another
+// entry of this poll already holds it. Does not do its own locking.
+static int poll_real_fd_for(struct poll *poll, struct fd *fd) {
+    struct poll_fd *poll_fd;
+    list_for_each_entry(&poll->poll_fds, poll_fd, fds) {
+        if (poll_fd->real_fd == fd->real_fd)
+            return dup(fd->real_fd);
+    }
+    return fd->real_fd;
+}
+
+// Takes an entry's host registration away, and its dup with it.
+static void poll_fd_unregister(struct poll_fd *poll_fd) {
+    if (poll_fd->real_fd < 0)
+        return;
+    real_poll_update(&poll_fd->poll->real, poll_fd->real_fd, 0, poll_fd);
+    if (poll_fd->real_fd != poll_fd->fd->real_fd)
+        close(poll_fd->real_fd);
+    poll_fd->real_fd = -1;
 }
 
 // See comment on pollfd_freelist for context
@@ -75,11 +96,11 @@ static void poll_fd_free(struct poll_fd *poll_fd) {
     list_add(&poll->pollfd_freelist, &poll_fd->fds);
 }
 
-bool poll_has_fd(struct poll *poll, struct fd *fd) {
-    return poll_find_fd(poll, fd) != NULL;
+bool poll_has_fd(struct poll *poll, struct fd *fd, fd_t num) {
+    return poll_find_fd(poll, fd, num) != NULL;
 }
 
-int poll_add_fd(struct poll *poll, struct fd *fd, int types, union poll_fd_info info) {
+int poll_add_fd(struct poll *poll, struct fd *fd, fd_t num, int types, union poll_fd_info info) {
     int err;
     lock(&fd->poll_lock);
     lock(&poll->lock);
@@ -96,16 +117,21 @@ int poll_add_fd(struct poll *poll, struct fd *fd, int types, union poll_fd_info 
         }
     }
     poll_fd->fd = fd;
+    poll_fd->num = num;
+    poll_fd->real_fd = -1;
     poll_fd->poll = poll;
     poll_fd->types = types;
     poll_fd->info = info;
     poll_fd->triggered_types = 0;
 
     if (poll_fd_is_real(poll_fd)) {
-        err = real_poll_update(&poll->real, fd->real_fd, types, poll_fd);
-        if (err < 0) {
-            free(poll_fd);
+        poll_fd->real_fd = poll_real_fd_for(poll, fd);
+        if (poll_fd->real_fd < 0 ||
+                real_poll_update(&poll->real, poll_fd->real_fd, types, poll_fd) < 0) {
             err = errno_map();
+            if (poll_fd->real_fd >= 0 && poll_fd->real_fd != fd->real_fd)
+                close(poll_fd->real_fd);
+            free(poll_fd);
             goto out;
         }
     }
@@ -120,23 +146,17 @@ out:
     return err;
 }
 
-int poll_del_fd(struct poll *poll, struct fd *fd) {
+int poll_del_fd(struct poll *poll, struct fd *fd, fd_t num) {
     int err;
     lock(&fd->poll_lock);
     lock(&poll->lock);
-    struct poll_fd *poll_fd = poll_find_fd(poll, fd);
+    struct poll_fd *poll_fd = poll_find_fd(poll, fd, num);
     if (poll_fd == NULL) {
         err = _ENOENT;
         goto out;
     }
 
-    if (poll_fd_is_real(poll_fd)) {
-        err = real_poll_update(&poll->real, fd->real_fd, 0, poll_fd);
-        if (err < 0) {
-            err = errno_map();
-            goto out;
-        }
-    }
+    poll_fd_unregister(poll_fd);
 
     list_remove(&poll_fd->polls);
     list_remove(&poll_fd->fds);
@@ -149,18 +169,18 @@ out:
     return err;
 }
 
-int poll_mod_fd(struct poll *poll, struct fd *fd, int types, union poll_fd_info info) {
+int poll_mod_fd(struct poll *poll, struct fd *fd, fd_t num, int types, union poll_fd_info info) {
     int err;
     lock(&fd->poll_lock);
     lock(&poll->lock);
-    struct poll_fd *poll_fd = poll_find_fd(poll, fd);
+    struct poll_fd *poll_fd = poll_find_fd(poll, fd, num);
     if (poll_fd == NULL) {
         err = _ENOENT;
         goto out;
     }
 
-    if (poll_fd_is_real(poll_fd)) {
-        err = real_poll_update(&poll->real, fd->real_fd, types, poll_fd);
+    if (poll_fd->real_fd >= 0) {
+        err = real_poll_update(&poll->real, poll_fd->real_fd, types, poll_fd);
         if (err < 0) {
             err = errno_map();
             goto out;
@@ -183,8 +203,7 @@ void poll_cleanup_fd(struct fd *fd) {
     struct poll_fd *poll_fd, *tmp;
     list_for_each_entry_safe(&fd->poll_fds, poll_fd, tmp, polls) {
         lock(&poll_fd->poll->lock);
-        if (poll_fd_is_real(poll_fd))
-            real_poll_update(&poll_fd->poll->real, fd->real_fd, 0, poll_fd);
+        poll_fd_unregister(poll_fd);
         list_remove(&poll_fd->polls);
         list_remove(&poll_fd->fds);
         unlock(&poll_fd->poll->lock);
@@ -248,11 +267,9 @@ int poll_wait(struct poll *poll_, poll_callback_t callback, void *context, struc
                 // thundering herd problem at all, but at least the semantics
                 // are right. I'll just leave that as a TODO.
                 if (poll_fd->types & POLL_ONESHOT) {
+                    poll_fd_unregister(poll_fd);
                     list_remove(&poll_fd->polls);
                     list_remove(&poll_fd->fds);
-                    if (poll_fd_is_real(poll_fd)) {
-                        real_poll_update(&poll_->real, fd->real_fd, 0, NULL);
-                    }
                     free(poll_fd);
                 }
 

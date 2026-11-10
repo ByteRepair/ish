@@ -56,7 +56,7 @@ static struct tgroup *tgroup_copy(struct tgroup *old_group) {
 static int copy_task(struct task *task, dword_t flags, addr_t stack, addr_t ptid_addr, addr_t tls_addr, addr_t ctid_addr) {
     task->vfork = NULL;
     if (stack != 0)
-        task->cpu.esp = stack;
+        CPU_SP(&task->cpu) = stack;
 
     int err;
     struct mm *mm = task->mm;
@@ -136,7 +136,7 @@ fail_free_mem:
     return err;
 }
 
-dword_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t ctid) {
+slong_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t ctid) {
     STRACE("clone(0x%x, 0x%x, 0x%x, 0x%x, 0x%x)", flags, stack, ptid, tls, ctid);
     if (flags & ~CSIGNAL_ & ~IMPLEMENTED_FLAGS) {
         FIXME("unimplemented clone flags 0x%x", flags & ~CSIGNAL_ & ~IMPLEMENTED_FLAGS);
@@ -161,7 +161,7 @@ dword_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t c
         unlock(&pids_lock);
         return err;
     }
-    task->cpu.eax = 0;
+    CPU_SYSCALL_RESULT(&task->cpu) = 0;
 
     struct vfork_info vfork;
     if (flags & CLONE_VFORK_) {
@@ -196,11 +196,21 @@ dword_t sys_clone(dword_t flags, addr_t stack, addr_t ptid, addr_t tls, addr_t c
     return pid;
 }
 
-dword_t sys_fork(void) {
+#if GUEST_X86_64
+// x86-64's clone passes (flags, stack, ptid, ctid, tls): the child-tid and
+// TLS pointers are swapped relative to i386's order, which sys_clone shares
+// with i386 (flags, stack, ptid, tls, ctid). Reorder here rather than in the
+// shared handler so i386's clone is untouched.
+slong_t sys_clone64(dword_t flags, addr_t stack, addr_t ptid, addr_t ctid, addr_t tls) {
+    return sys_clone(flags, stack, ptid, tls, ctid);
+}
+#endif
+
+slong_t sys_fork(void) {
     return sys_clone(SIGCHLD_, 0, 0, 0, 0);
 }
 
-dword_t sys_vfork(void) {
+slong_t sys_vfork(void) {
     return sys_clone(CLONE_VFORK_ | CLONE_VM_ | SIGCHLD_, 0, 0, 0, 0);
 }
 

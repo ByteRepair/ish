@@ -110,7 +110,21 @@ typedef int32_t sdword_t;
 typedef uint16_t word_t;
 typedef uint8_t byte_t;
 
+// The guest's own widths. A guest pointer is addr_t, a guest C long (and
+// size_t, ssize_t, and every syscall argument and return) is ulong_t or
+// slong_t, and a guest C int is uint_t or int_t. On i386 the long and the
+// int are both 32 bits, so the two families are the same types there and
+// iSH's i386 build compiles exactly as it did; on x86_64 the long family is
+// 64 bits and the int family stays 32. See docs/blinkish.md.
+#if GUEST_X86_64
+typedef qword_t addr_t;
+typedef qword_t ulong_t;
+typedef sqword_t slong_t;
+#else
 typedef dword_t addr_t;
+typedef dword_t ulong_t;
+typedef sdword_t slong_t;
+#endif
 typedef dword_t uint_t;
 typedef sdword_t int_t;
 
@@ -118,8 +132,8 @@ typedef sdword_t pid_t_;
 typedef dword_t uid_t_;
 typedef word_t mode_t_;
 typedef sqword_t off_t_;
-typedef dword_t time_t_;
-typedef dword_t clock_t_;
+typedef ulong_t time_t_;
+typedef ulong_t clock_t_;
 
 #define uint(size) glue3(uint,size,_t)
 #define sint(size) glue3(int,size,_t)

@@ -3,9 +3,12 @@
 
 #include "misc.h"
 
-// top 20 bits of an address, i.e. address >> 12
-typedef dword_t page_t;
-#define BAD_PAGE 0x10000
+// an address >> 12: 20 bits of an i386 address, 35 of an x86-64 one
+typedef ulong_t page_t;
+// No page is this one: all ones is past the top of every guest's address
+// space. (It was 0x10000, a real page that only the hole finder's range kept
+// from coming back.)
+#define BAD_PAGE ((page_t) -1)
 
 #ifndef __KERNEL__
 #define PAGE_BITS 12
@@ -13,15 +16,22 @@ typedef dword_t page_t;
 #define PAGE_SIZE (1 << PAGE_BITS)
 #define PAGE(addr) ((addr) >> PAGE_BITS)
 #define PGOFFSET(addr) ((addr) & (PAGE_SIZE - 1))
-typedef dword_t pages_t;
+typedef ulong_t pages_t;
 // bytes MUST be unsigned if you would like this to overflow to zero
 #define PAGE_ROUND_UP(bytes) (PAGE((bytes) + PAGE_SIZE - 1))
-#define MEM_PAGES (1 << 20) // at least on 32-bit
+#if GUEST_X86_64
+#define MEM_PAGES ((page_t) 1 << 35) // the 47-bit user half
+#else
+#define MEM_PAGES (1 << 20)
+#endif
 #endif
 
 struct mmu {
     struct mmu_ops *ops;
+    // the engine's own state for this address space; see emu/engine.h
+#if !ENGINE_BLINK
     struct asbestos *asbestos;
+#endif
     uint64_t changes;
 };
 
