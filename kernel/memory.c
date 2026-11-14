@@ -425,8 +425,7 @@ static bool mem_grows_into(struct mem *mem, page_t page) {
 }
 
 // Changing memory maps needs the write lock, and mem_ptr is called with the
-// read lock, so it is let go for the change. Another thread can change the
-// same page in between: what was looked up before is looked up again after.
+// read lock. Anything looked up before the swap is stale after it.
 static void mem_read_to_write(struct mem *mem) {
     read_wrunlock(&mem->lock);
     write_wrlock(&mem->lock);
@@ -467,15 +466,20 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
         // if page is cow, ~~milk~~ copy it
         if (entry->flags & P_COW) {
             mem_read_to_write(mem);
-            // A thread that copied it first freed the shared page when it
-            // did, and mapping a second copy would drop the first's writes
-            // and unmap a page an instruction may still be writing through.
+            // a thread that copied it first freed the shared page, and a
+            // second copy would unmap the first under an instruction using it
             entry = mem_pt(mem, page);
             if (entry != NULL && (entry->flags & P_COW)) {
-                void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-                memcpy(copy, (char *) entry->data->data + entry->offset, PAGE_SIZE);
-                pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
+                // Held by nobody else, it is this page's own: a copy would
+                // free it under another thread's instruction reading it.
+                if (entry->data->refcount == 1 && type == MEM_WRITE) {
+                    entry->flags &= ~P_COW;
+                } else {
+                    void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+                    memcpy(copy, (char *) entry->data->data + entry->offset, PAGE_SIZE);
+                    pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
+                }
             }
             mem_write_to_read(mem);
         }

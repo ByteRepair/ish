@@ -374,14 +374,15 @@ runnable on the macOS harness (below) before the next begins.
    thread's handler ran on the last one set. It is per task now.
    `tests/blinkish/preempt.c` is both, without Go.
 
-   The app crashed on device in malloc, under whatever drew next, while a
-   many-threaded CLI ran. `mem_ptr` lets go of the read lock to copy a
-   copy-on-write page and copied what it had looked up before: a second
-   thread writing the same page after a fork copied it again, from the
-   shared page the first copy had freed, and mapped its copy over the
-   first, unmapping a page an instruction on a third thread could still be
-   writing through. What it looked up it now looks up again under the write
-   lock, stack growth too. `tests/regress/cow_race.c`.
+   The app crashed on device in malloc while a many-threaded CLI ran.
+   `mem_ptr` swaps the read lock for the write lock to copy a copy-on-write
+   page, and copied what it had looked up before the swap: two threads
+   writing one page after a fork both copied it, the second over the first,
+   unmapping a page a third could still be writing through. It now looks the
+   page up again after the swap, stack growth too, and takes a page nobody
+   else holds as its own instead of copying it, so no copy frees memory an
+   instruction may still be using. `futex_load` read its word after letting
+   go of the lock, and now reads it before. `tests/regress/cow_race.c`.
 
 ## The harness
 

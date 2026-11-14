@@ -1,17 +1,10 @@
-// Threads writing the same copy-on-write pages at once, after a fork. Each
-// thread's first write to a page copies it; mem_ptr took the page's entry
-// under the read lock and copied it after dropping that for the write lock,
-// so a second thread that had seen the page shared copied it again, from the
-// original the first copy had already freed, and mapped its copy over the
-// first, losing what the first thread wrote. Each thread here writes its own
-// slot of every page and the test reads every slot back.
+// Threads writing the same copy-on-write pages at once after a fork, each its
+// own slot of every page, which the test reads back: a page two threads both
+// copied kept only one thread's writes.
 #include "sys.h"
 
-#define CLONE_VM 0x00000100
-#define CLONE_FS 0x00000200
-#define CLONE_FILES 0x00000400
-#define CLONE_SIGHAND 0x00000800
-#define CLONE_THREAD 0x00010000
+// CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD
+#define THREAD_FLAGS 0x10f00
 
 enum { THREADS = 6, PAGES = 64, ROUNDS = 40, STACK = 16384, STRIDE = 4096 / sizeof(long) };
 
@@ -30,8 +23,6 @@ static void worker(long t) {
     }
     sys1(NR_exit, 0);
 }
-
-#define THREAD_FLAGS (CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD)
 
 // The child starts on its own stack with nothing to return to, so it calls
 // worker from here.
@@ -75,6 +66,7 @@ static slong spawn(long t) {
 void _start(void) {
     pages = mmap_(0, PAGES * 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     check((ulong) pages < (ulong) -4096, "mmap failed");
+    // fault every page in, so the fork has something to share
     for (int p = 0; p < PAGES; p++)
         pages[p * STRIDE + THREADS] = 1;
     for (long t = 0; t < THREADS; t++)
