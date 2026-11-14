@@ -36,6 +36,12 @@ struct task {
     struct fdtable *files;
     struct fs_info *fs;
 
+    // The alternate signal stack is per thread, as on Linux: Go gives each
+    // of its threads its own, and one shared stack let two threads' handlers
+    // run on the same memory. locked by sighand->lock
+    addr_t altstack;
+    dword_t altstack_size;
+
     // locked by sighand->lock
     struct sighand *sighand;
     sigset_t_ blocked;

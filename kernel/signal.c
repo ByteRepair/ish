@@ -14,8 +14,8 @@
 int xsave_extra = 0;
 int fxsave_extra = 0;
 static void sigmask_set(sigset_t_ set);
-static void altstack_to_user(struct sighand *sighand, struct stack_t_ *user_stack);
-static bool is_on_altstack(addr_t sp, struct sighand *sighand);
+static void altstack_to_user(struct task *task, struct stack_t_ *user_stack);
+static bool is_on_altstack(addr_t sp, struct task *task);
 
 static int signal_is_blockable(int sig) {
     return sig != SIGKILL_ && sig != SIGSTOP_;
@@ -207,7 +207,7 @@ static void setup_rt_sigframe(struct siginfo_ *info, struct rt_sigframe_ *frame)
     frame->info = *info;
     frame->uc.flags = 0;
     frame->uc.link = 0;
-    altstack_to_user(current->sighand, &frame->uc.stack);
+    altstack_to_user(current, &frame->uc.stack);
     setup_sigcontext(&frame->uc.mcontext, &current->cpu);
     frame->uc.sigmask = current->blocked;
 
@@ -294,7 +294,7 @@ static void setup_rt_sigframe_64(struct siginfo_ *info, struct rt_sigframe_64 *f
     frame->pretcode = action->restorer;
     frame->uc.flags = 0;
     frame->uc.link = 0;
-    altstack_to_user(current->sighand, &frame->uc.stack);
+    altstack_to_user(current, &frame->uc.stack);
 
     struct sigcontext_64 *sc = &frame->uc.mcontext;
     sc->r8 = r->gpr[8]; sc->r9 = r->gpr[9]; sc->r10 = r->gpr[10]; sc->r11 = r->gpr[11];
@@ -350,23 +350,31 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
 #if GUEST_X86_64
     struct x86_64_regs *r = &current->cpu.r;
     addr_t sp = r->rsp;
-    if (sighand->altstack && !is_on_altstack(sp, sighand))
-        sp = sighand->altstack + sighand->altstack_size;
+    if (current->altstack && !is_on_altstack(sp, current))
+        sp = current->altstack + current->altstack_size;
+    else
+        sp -= 128; // the red zone the interrupted code may still be using
 
-    // The frame sits below the current stack, its pretcode at the top so the
-    // handler's `ret` pops the restorer; the fxsave area is 16-byte aligned
-    // below the frame. rsp is the frame start, exactly as Linux enters a
-    // handler, so [rsp] is the return address (pretcode).
+    // pretcode is at the frame's start, so the handler's `ret` pops the
+    // restorer: rsp is the frame start, exactly as Linux enters a handler,
+    // and [rsp] is the return address.
     struct rt_sigframe_64 frame;
     struct fpstate_64 fp;
     setup_rt_sigframe_64(info, &frame, &fp);
 
-    sp -= sizeof(frame);
-    sp &= ~0xfULL; // the frame is 16-byte aligned
-    addr_t frame_addr = sp;
+    // Linux's order (get_sigframe): the fxsave area highest, the frame
+    // below it, so the handler's stack, growing down from the frame, never
+    // reaches the saved registers. Below the frame, a handler's few hundred
+    // bytes of stack overwrote the xmm registers rt_sigreturn puts back,
+    // which is how Go's preemption signal corrupted what the interrupted
+    // code held in them. The frame sits 8 below a 16-byte boundary, as if
+    // a call had pushed pretcode.
     sp -= sizeof(fp);
     sp &= ~0xfULL;
     addr_t fp_guest = sp;
+    sp -= sizeof(frame);
+    sp = (sp & ~0xfULL) - 8;
+    addr_t frame_addr = sp;
     frame.uc.mcontext.fpstate = fp_guest;
     r->rsp = frame_addr;
 
@@ -411,8 +419,8 @@ static void receive_signal(struct sighand *sighand, struct siginfo_ *info) {
     current->cpu.eip = sighand->action[info->sig].handler;
 
     dword_t sp = current->cpu.esp;
-    if (sighand->altstack && !is_on_altstack(sp, sighand)) {
-        sp = sighand->altstack + sighand->altstack_size;
+    if (current->altstack && !is_on_altstack(sp, current)) {
+        sp = current->altstack + current->altstack_size;
     }
     if (xsave_extra) {
         // do as the kernel does
@@ -580,10 +588,10 @@ slong_t sys_rt_sigreturn(void) {
     }
 
     lock(&current->sighand->lock);
-    if (!is_on_altstack(r->rsp, current->sighand) &&
+    if (!is_on_altstack(r->rsp, current) &&
             frame.uc.stack.size >= MINSIGSTKSZ_) {
-        current->sighand->altstack = frame.uc.stack.stack;
-        current->sighand->altstack_size = frame.uc.stack.size;
+        current->altstack = frame.uc.stack.stack;
+        current->altstack_size = frame.uc.stack.size;
     }
     sigmask_set(frame.uc.sigmask);
     unlock(&current->sighand->lock);
@@ -625,10 +633,10 @@ slong_t sys_rt_sigreturn(void) {
 
     lock(&current->sighand->lock);
     // FIXME this duplicates logic from sys_sigaltstack
-    if (!is_on_altstack(cpu->esp, current->sighand) &&
+    if (!is_on_altstack(cpu->esp, current) &&
             frame.uc.stack.size >= MINSIGSTKSZ_) {
-        current->sighand->altstack = frame.uc.stack.stack;
-        current->sighand->altstack_size = frame.uc.stack.size;
+        current->altstack = frame.uc.stack.stack;
+        current->altstack_size = frame.uc.stack.size;
     }
     sigmask_set(frame.uc.sigmask);
     unlock(&current->sighand->lock);
@@ -786,17 +794,17 @@ slong_t sys_rt_sigpending(addr_t set_addr) {
     return 0;
 }
 
-static bool is_on_altstack(addr_t sp, struct sighand *sighand) {
-    return sp > sighand->altstack && sp <= sighand->altstack + sighand->altstack_size;
+static bool is_on_altstack(addr_t sp, struct task *task) {
+    return sp > task->altstack && sp <= task->altstack + task->altstack_size;
 }
 
-static void altstack_to_user(struct sighand *sighand, struct stack_t_ *user_stack) {
-    user_stack->stack = sighand->altstack;
-    user_stack->size = sighand->altstack_size;
+static void altstack_to_user(struct task *task, struct stack_t_ *user_stack) {
+    user_stack->stack = task->altstack;
+    user_stack->size = task->altstack_size;
     user_stack->flags = 0;
-    if (sighand->altstack == 0)
+    if (task->altstack == 0)
         user_stack->flags |= SS_DISABLE_;
-    if (is_on_altstack(CPU_SP(&current->cpu), sighand))
+    if (is_on_altstack(CPU_SP(&task->cpu), task))
         user_stack->flags |= SS_ONSTACK_;
 }
 
@@ -806,14 +814,14 @@ slong_t sys_sigaltstack(addr_t ss_addr, addr_t old_ss_addr) {
     lock(&sighand->lock);
     if (old_ss_addr != 0) {
         struct stack_t_ old_ss;
-        altstack_to_user(sighand, &old_ss);
+        altstack_to_user(current, &old_ss);
         if (user_put(old_ss_addr, old_ss)) {
             unlock(&sighand->lock);
             return _EFAULT;
         }
     }
     if (ss_addr != 0) {
-        if (is_on_altstack(CPU_SP(&current->cpu), sighand)) {
+        if (is_on_altstack(CPU_SP(&current->cpu), current)) {
             unlock(&sighand->lock);
             return _EPERM;
         }
@@ -823,12 +831,14 @@ slong_t sys_sigaltstack(addr_t ss_addr, addr_t old_ss_addr) {
             return _EFAULT;
         }
         if (ss.flags & SS_DISABLE_) {
-            sighand->altstack = 0;
+            current->altstack = 0;
         } else {
-            if (ss.size < MINSIGSTKSZ_)
+            if (ss.size < MINSIGSTKSZ_) {
+                unlock(&sighand->lock);
                 return _ENOMEM;
-            sighand->altstack = ss.stack;
-            sighand->altstack_size = ss.size;
+            }
+            current->altstack = ss.stack;
+            current->altstack_size = ss.size;
         }
     }
     unlock(&sighand->lock);

@@ -361,6 +361,19 @@ runnable on the macOS harness (below) before the next begins.
    encoding as the legacy instruction of its opcode; with no AVX
    advertised, the decoder now refuses every VEX encoding but BMI2's.
 
+   gh, a Go program, crashed every run with a different fatal error, and
+   ran with `GODEBUG=asyncpreemptoff=1`. The kernel's x86-64 signal frame
+   was the cause, twice over. The fxsave area sat below the frame, where
+   the handler's own stack grows: Go's handler uses kilobytes of it and
+   wrote over the xmm registers rt_sigreturn then put back, and Go copies
+   two-word values through xmm, so a preempted goroutine resumed with
+   pointers where its fields were. The area now sits above the frame, as
+   Linux's `get_sigframe` puts it, with the frame 8 below a 16-byte
+   boundary and the red zone skipped. And the sigaltstack was the
+   process's, not the thread's: Go gives each thread its own, so every
+   thread's handler ran on the last one set. It is per task now.
+   `tests/blinkish/preempt.c` is both, without Go.
+
 ## The harness
 
 Nothing in a milestone needs iOS until 8. On macOS:

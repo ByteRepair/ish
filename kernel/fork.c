@@ -85,6 +85,10 @@ static int copy_task(struct task *task, dword_t flags, addr_t stack, addr_t ptid
             goto fail_free_files;
     }
 
+    // A new thread starts with no alternate stack; a forked process keeps it.
+    if ((flags & CLONE_VM_) && !(flags & CLONE_VFORK_))
+        task->altstack = 0;
+
     if (flags & CLONE_SIGHAND_) {
         task->sighand->refcount++;
     } else {
