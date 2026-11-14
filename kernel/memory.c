@@ -416,6 +416,27 @@ static void *mem_ptr_nofault(struct mem *mem, addr_t addr, int type) {
     return entry->data->data + entry->offset + PGOFFSET(addr);
 }
 
+// Whether page is missing just below a region that grows down into it.
+static bool mem_grows_into(struct mem *mem, page_t page) {
+    if (mem_pt(mem, page) != NULL)
+        return false;
+    page_t p = mem_next_mapped(mem, page + 1);
+    return p < MEM_PAGES && (mem_pt(mem, p)->flags & P_GROWSDOWN);
+}
+
+// Changing memory maps needs the write lock, and mem_ptr is called with the
+// read lock, so it is let go for the change. Another thread can change the
+// same page in between: what was looked up before is looked up again after.
+static void mem_read_to_write(struct mem *mem) {
+    read_wrunlock(&mem->lock);
+    write_wrlock(&mem->lock);
+}
+
+static void mem_write_to_read(struct mem *mem) {
+    write_wrunlock(&mem->lock);
+    read_wrlock(&mem->lock);
+}
+
 void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     void *old_ptr = mem_ptr_nofault(mem, addr, type); // just for an assert
 
@@ -423,25 +444,12 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     struct pt_entry *entry = mem_pt(mem, page);
 
     if (entry == NULL) {
-        // page does not exist
-        // look to see if the next VM region is willing to grow down
-        page_t p = mem_next_mapped(mem, page + 1);
-        if (p >= MEM_PAGES)
+        if (!mem_grows_into(mem, page))
             return NULL;
-        if (!(mem_pt(mem, p)->flags & P_GROWSDOWN))
-            return NULL;
-
-        // Changing memory maps must be done with the write lock. But this is
-        // called with the read lock.
-        // This locking stuff is copy/pasted for all the code in this function
-        // which changes memory maps.
-        // TODO: factor the lock/unlock code here into a new function. Do this
-        // next time you touch this function.
-        read_wrunlock(&mem->lock);
-        write_wrlock(&mem->lock);
-        pt_map_nothing(mem, page, 1, P_WRITE | P_GROWSDOWN);
-        write_wrunlock(&mem->lock);
-        read_wrlock(&mem->lock);
+        mem_read_to_write(mem);
+        if (mem_grows_into(mem, page))
+            pt_map_nothing(mem, page, 1, P_WRITE | P_GROWSDOWN);
+        mem_write_to_read(mem);
 
         entry = mem_pt(mem, page);
     }
@@ -458,17 +466,18 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
         engine_page_changed(&mem->mmu, page);
         // if page is cow, ~~milk~~ copy it
         if (entry->flags & P_COW) {
-            void *data = (char *) entry->data->data + entry->offset;
-            void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-
-            // copy/paste from above
-            read_wrunlock(&mem->lock);
-            write_wrlock(&mem->lock);
-            memcpy(copy, data, PAGE_SIZE);
-            pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
-            write_wrunlock(&mem->lock);
-            read_wrlock(&mem->lock);
+            mem_read_to_write(mem);
+            // A thread that copied it first freed the shared page when it
+            // did, and mapping a second copy would drop the first's writes
+            // and unmap a page an instruction may still be writing through.
+            entry = mem_pt(mem, page);
+            if (entry != NULL && (entry->flags & P_COW)) {
+                void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+                memcpy(copy, (char *) entry->data->data + entry->offset, PAGE_SIZE);
+                pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
+            }
+            mem_write_to_read(mem);
         }
     }
 
