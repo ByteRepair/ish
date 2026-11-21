@@ -88,13 +88,7 @@ static void futex_put(struct futex *futex) {
 
 static int futex_load(struct futex *futex, dword_t *out) {
     assert(futex->mem == current->mem);
-    read_wrlock(&current->mem->lock);
-    dword_t *ptr = mem_ptr(current->mem, futex->addr, MEM_READ);
-    // read under the lock: past it, another thread can unmap the page
-    if (ptr != NULL)
-        *out = *ptr;
-    read_wrunlock(&current->mem->lock);
-    return ptr == NULL;
+    return user_get(futex->addr, *out);
 }
 
 static int futex_wait(addr_t uaddr, dword_t val, struct timespec *timeout, dword_t bitset) {

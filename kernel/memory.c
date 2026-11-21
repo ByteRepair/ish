@@ -436,6 +436,27 @@ static void mem_write_to_read(struct mem *mem) {
     read_wrlock(&mem->lock);
 }
 
+static void mem_grow_into(struct mem *mem, page_t page) {
+    mem_read_to_write(mem);
+    if (mem_grows_into(mem, page))
+        pt_map_nothing(mem, page, 1, P_WRITE | P_GROWSDOWN);
+    mem_write_to_read(mem);
+}
+
+// Unless another thread copied it first: that freed the shared page, and a
+// second copy would unmap the first under an instruction using it.
+static void mem_copy_cow(struct mem *mem, page_t page) {
+    mem_read_to_write(mem);
+    struct pt_entry *entry = mem_pt(mem, page);
+    if (entry != NULL && (entry->flags & P_COW)) {
+        void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+        memcpy(copy, (char *) entry->data->data + entry->offset, PAGE_SIZE);
+        pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
+    }
+    mem_write_to_read(mem);
+}
+
 void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     void *old_ptr = mem_ptr_nofault(mem, addr, type); // just for an assert
 
@@ -445,11 +466,7 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
     if (entry == NULL) {
         if (!mem_grows_into(mem, page))
             return NULL;
-        mem_read_to_write(mem);
-        if (mem_grows_into(mem, page))
-            pt_map_nothing(mem, page, 1, P_WRITE | P_GROWSDOWN);
-        mem_write_to_read(mem);
-
+        mem_grow_into(mem, page);
         entry = mem_pt(mem, page);
     }
 
@@ -464,25 +481,8 @@ void *mem_ptr(struct mem *mem, addr_t addr, int type) {
         // get rid of any compiled blocks in this page
         engine_page_changed(&mem->mmu, page);
         // if page is cow, ~~milk~~ copy it
-        if (entry->flags & P_COW) {
-            mem_read_to_write(mem);
-            // a thread that copied it first freed the shared page, and a
-            // second copy would unmap the first under an instruction using it
-            entry = mem_pt(mem, page);
-            if (entry != NULL && (entry->flags & P_COW)) {
-                // Held by nobody else, it is this page's own: a copy would
-                // free it under another thread's instruction reading it.
-                if (entry->data->refcount == 1 && type == MEM_WRITE) {
-                    entry->flags &= ~P_COW;
-                } else {
-                    void *copy = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
-                    memcpy(copy, (char *) entry->data->data + entry->offset, PAGE_SIZE);
-                    pt_map(mem, page, 1, copy, 0, entry->flags &~ P_COW);
-                }
-            }
-            mem_write_to_read(mem);
-        }
+        if (entry->flags & P_COW)
+            mem_copy_cow(mem, page);
     }
 
     void *ptr = mem_ptr_nofault(mem, addr, type);

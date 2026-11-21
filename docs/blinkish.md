@@ -379,10 +379,15 @@ runnable on the macOS harness (below) before the next begins.
    page, and copied what it had looked up before the swap: two threads
    writing one page after a fork both copied it, the second over the first,
    unmapping a page a third could still be writing through. It now looks the
-   page up again after the swap, stack growth too, and takes a page nobody
-   else holds as its own instead of copying it, so no copy frees memory an
-   instruction may still be using. `futex_load` read its word after letting
-   go of the lock, and now reads it before. `tests/regress/cow_race.c`.
+   page up again after the swap, stack growth too, and `futex_load` reads
+   its word under the lock rather than after it. `tests/regress/cow_race.c`.
+
+   What is left: a thread paused in that swap still holds pointers from
+   earlier in its instruction, and anything another thread frees meanwhile
+   (a last holder's copy-on-write copy, munmap, `MADV_DONTNEED`) frees them
+   under it. The fix is to hold such frees until no thread is mid-swap;
+   taking a last-held page in place instead of copying would only pin its
+   whole original mapping for one page.
 
 ## The harness
 
